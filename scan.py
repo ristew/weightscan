@@ -1,5 +1,6 @@
 import datetime
 import os
+import math
 
 import imageio
 from io import BytesIO
@@ -24,7 +25,7 @@ class Scan():
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 50
-        self.prompt = '''After the fire comes'''
+        self.prompt = '''In 1972, the president was'''
 
     def gemma(self):
         return self.model_name == 'google/gemma-2b'
@@ -55,10 +56,13 @@ class Scan():
     def embed(self):
         final = self.normed_states[-1]
         basis = torch.stack(self.normed_states)
-        print('final normed state', final)
-        tsne_reducer = TSNE(n_components=3, perplexity=20, metric='cosine').fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
+        basis = self.norm(basis.sum(1))
+        basis = basis.view(basis.size(0), 1, 64, 40)
+        splat = F.adaptive_avg_pool2d(basis, [100, 100]).squeeze(1)
+        print('splat', splat.shape, splat)
+        tsne_reducer = TSNE(n_components=2, perplexity=20, metric='cosine').fit(splat.cpu().detach().numpy().reshape(-1, splat.size(-1)))
         print('tsne fit, transforming...')
-        return [tsne_reducer.transform(state.cpu().detach().numpy()) for state in self.normed_states]
+        return [tsne_reducer.transform(state.cpu().detach().numpy()) for state in splat]
 
     def logits(self, layer=-1):
         return self.model.lm_head(self.normed_states[layer]).float()
