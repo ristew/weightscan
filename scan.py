@@ -57,12 +57,12 @@ class Scan():
         final = self.normed_states[-1]
         basis = torch.stack(self.normed_states)
         basis = self.norm(basis.sum(1))
-        basis = basis.view(basis.size(0), 1, 64, 40)
-        splat = F.adaptive_avg_pool2d(basis, [100, 100]).squeeze(1)
-        print('splat', splat.shape, splat)
-        tsne_reducer = TSNE(n_components=2, perplexity=20, metric='cosine').fit(splat.cpu().detach().numpy().reshape(-1, splat.size(-1)))
+        basis = basis.view(basis.size(0), 32, 80)
+        # splat = F.adaptive_avg_pool2d(basis, [128, 32]).squeeze(1)
+        # print('splat', splat.shape, splat)
+        tsne_reducer = TSNE(n_components=2, perplexity=20, metric='cosine', n_jobs=8).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
         print('tsne fit, transforming...')
-        return [tsne_reducer.transform(state.cpu().detach().numpy()) for state in splat]
+        return [tsne_reducer.transform(state.cpu().detach().numpy()) for state in basis]
 
     def logits(self, layer=-1):
         return self.model.lm_head(self.normed_states[layer]).float()
