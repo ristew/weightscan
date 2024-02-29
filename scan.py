@@ -6,13 +6,33 @@ import imageio
 from io import BytesIO
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from umap import UMAP
-from openTSNE import TSNE
 import matplotlib.pyplot as plt
 from PIL import Image
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
 import seaborn as sns
+
+
+class TransformerAutoencoder(nn.Module):
+    def __init__(self, input_dim, compressed_dim=(1000, 8)):
+        super(TransformerAutoencoder, self).__init__()
+        self.input_dim = input_dim
+        self.compressed_dim = compressed_dim
+        self.global_pool = nn.AdaptiveAvgPool1d(1)
+        self.encoder_fc = nn.Linear(input_dim, compressed_dim[0] * compressed_dim[1])
+        self.decoder_fc = nn.Linear(compressed_dim[0] * compressed_dim[1], input_dim)
+
+    def forward(self, x):
+        # x shape: [batch_size, seq_length, input_dim]
+        x_pooled = self.global_pool(x.transpose(1, 2))
+        x_pooled = x_pooled.squeeze(-1)
+        encoded = self.encoder_fc(x_pooled)
+        encoded = encoded.view(-1, self.compressed_dim[0], self.compressed_dim[1])
+        decoded = self.decoder_fc(encoded.view(-1, self.compressed_dim[0] * self.compressed_dim[1]))
+        decoded = decoded.view(-1, self.input_dim)
+        return encoded, decoded
 
 class Scan():
     def __init__(self):
@@ -21,22 +41,20 @@ class Scan():
         # model_name = 'MistralAI/Mistral-7B-v0.1'
         # self.model_name = 'google/gemma-2b'
         self.model_name = 'microsoft/phi-2'
+        # self.model_name = 'stabilityai/stablelm-3b-4e1t'
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 50
-        self.prompt = '''In 1972, the president was'''
+        self.prompt = '''A B A A => A A\nB A B A B => B\nA A B B => A'''
 
     def gemma(self):
         return self.model_name == 'google/gemma-2b'
     def norm(self, state):
-        if self.gemma():
-            return self.model.model.norm(state)
-        elif self.model_name == 'microsoft/phi-2':
+        if self.model_name == 'microsoft/phi-2':
             return self.model.model.final_layernorm(state)
         else:
-            print('guessing norm', self.model_name)
-            return self.model.norm(state)
+            return self.model.model.norm(state)
 
     def forward(self):
         enc = self.tokenizer(self.prompt, return_tensors='pt', return_attention_mask=False)
@@ -46,35 +64,47 @@ class Scan():
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
         print(hidden_states[0][0].shape)
-        normed_states = [self.norm(hs.squeeze(0)) for hs in hidden_states[:-1]]
+        normed_states = [self.norm(hs) for hs in hidden_states[:-1]]
         # output layer is already normed
         final = hidden_states[-1]
-        normed_states.append(final.squeeze(0))
+        normed_states.append(final)
         self.normed_states = normed_states
         return normed_states
 
+    def autoencode(self):
+        autoencoder = TransformerAutoencoder(input_dim=self.normed_states[0][0][0].size()[0])
+        num_epochs = 10
+        criterion = nn.MSELoss()
+        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.001)
+        for data in self.normed_states:
+            print('data', data.shape)
+            optimizer.zero_grad()
+            encoded, decoded = autoencoder(data.float())
+            loss = criterion(decoded, data.float())
+            loss.backward(retain_graph=True)
+            optimizer.step()
+
+        res = [autoencoder(n.float())[0] for n in self.normed_states]
+        return res
+
     def embed(self):
-        final = self.normed_states[-1]
-        basis = torch.stack(self.normed_states)
-        basis = self.norm(basis.sum(1))
-        basis = basis.view(basis.size(0), 32, 80)
-        # splat = F.adaptive_avg_pool2d(basis, [128, 32]).squeeze(1)
-        # print('splat', splat.shape, splat)
-        tsne_reducer = TSNE(n_components=2, perplexity=20, metric='cosine', n_jobs=8).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
-        print('tsne fit, transforming...')
-        return [tsne_reducer.transform(state.cpu().detach().numpy()) for state in basis]
+        basis = torch.stack(self.autoencode()).squeeze()
+        print('fit basis', basis.shape)
+        reducer = UMAP(n_components=3, metric='cosine', min_dist=0).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
+        print('reducer fit, transforming...')
+        return [reducer.transform(state.cpu().detach().numpy()) for state in basis]
 
     def logits(self, layer=-1):
-        return self.model.lm_head(self.normed_states[layer]).float()
+        return self.model.lm_head(self.normed_states[layer].unsqueeze(0)).float()
 
     def logprobs(self, layer=-1):
-        probs = F.softmax(self.logits(layer).unsqueeze(0), dim=-1)
+        probs = F.softmax(self.logits(layer)[0], dim=-1)
         return torch.topk(probs[0, -1, :], self.top_k)
 
     def plot_embedding(self, embedding, layer_id):
         plt.figure(figsize=(10, 10))
         ax = sns.kdeplot(x=embedding[:, 0], y=embedding[:, 1], cmap="mako", levels=50)
-        plt.scatter(x=embedding[:, 0], y=embedding[:, 1], c="white", edgecolors="white")
+        plt.scatter(x=embedding[:, 0], y=embedding[:, 2], c="white", edgecolors="white")
 
         ax.set_facecolor('black')
         plt.gcf().set_facecolor('black')
@@ -88,6 +118,7 @@ class Scan():
         plt.axis([self.global_x_min, self.global_x_max, self.global_y_min, self.global_y_max])
         plt.title(f"layer {layer_id}")
         top_probs, top_indices = self.logprobs(layer_id)
+        print(top_indices.shape)
         top_tokens = [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
         top_info = ", ".join([f"({repr(token)}, {prob:.2f})" for token, prob in top_tokens[:5]])
         text_str = f"prompt: {repr(self.prompt)}\ntop_k({self.top_k}): {top_info}"
@@ -105,13 +136,12 @@ class Scan():
         output = self.forward()
         self.get_normed_states(output)
         embeddings = self.embed()
-        print('embeddings', embeddings)
         self.global_x_min = min(embedding[:, 0].min() for embedding in embeddings)
         self.global_x_max = max(embedding[:, 0].max() for embedding in embeddings)
         self.global_y_min = min(embedding[:, 1].min() for embedding in embeddings)
         self.global_y_max = max(embedding[:, 1].max() for embedding in embeddings)
 
-        buffer = 7
+        buffer = max(self.global_x_max - self.global_x_min, self.global_y_max - self.global_y_min) / 6
         self.global_x_min -= buffer
         self.global_x_max += buffer
         self.global_y_min -= buffer
