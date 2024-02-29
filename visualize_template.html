@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>weightscan</title>
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { margin: 0; }
+      canvas { display: block; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.126.1/build/three.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.126.1/examples/js/controls/OrbitControls.js"></script>
+    <script>
+      const POINTS = $$POINTS$$;
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      const renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.addEventListener('DOMContentLoaded', function() {
+        document.body.appendChild(renderer.domElement);
+      });
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      camera.position.set(0, 0, 100);
+      POINTS.forEach(frame => {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(frame.flat());
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({ color: 0xA9809B });
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+      });
+
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update(); // Only required if controls.enableDamping = true, or if controls.autoRotate = true
+        renderer.render(scene, camera);
+      }
+      animate();
+    </script>
+  </head>
+  <body>
+  </body>
+</html>

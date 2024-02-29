@@ -1,7 +1,7 @@
 import datetime
 import os
 import math
-
+import json
 import imageio
 from io import BytesIO
 import numpy as np
@@ -46,7 +46,8 @@ class Scan():
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 50
-        self.prompt = '''A B A A => A A\nB A B A B => B\nA A B B => A'''
+        # self.prompt = '''A B A A => A A\nB A B A B => B\nA A B B => A'''
+        self.prompt = 'jesus'
 
     def gemma(self):
         return self.model_name == 'google/gemma-2b'
@@ -75,12 +76,13 @@ class Scan():
         autoencoder = TransformerAutoencoder(input_dim=self.normed_states[0][0][0].size()[0])
         num_epochs = 10
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0001)
         for data in self.normed_states:
             print('data', data.shape)
             optimizer.zero_grad()
             encoded, decoded = autoencoder(data.float())
             loss = criterion(decoded, data.float())
+            print('loss', loss)
             loss.backward(retain_graph=True)
             optimizer.step()
 
@@ -140,7 +142,6 @@ class Scan():
         self.global_x_max = max(embedding[:, 0].max() for embedding in embeddings)
         self.global_y_min = min(embedding[:, 1].min() for embedding in embeddings)
         self.global_y_max = max(embedding[:, 1].max() for embedding in embeddings)
-
         buffer = max(self.global_x_max - self.global_x_min, self.global_y_max - self.global_y_min) / 6
         self.global_x_min -= buffer
         self.global_x_max += buffer
@@ -152,5 +153,24 @@ class Scan():
             images.append(self.plot_embedding(embedding, i))
 
         imageio.mimsave('hidden_states.mp4', images, format='MP4', fps=2)
+        points = json.dumps([(p * 20).tolist() for p in embeddings], cls=CustomEncoder, precision=4)
 
+        print(points)
+        with open('visualize_template.html', 'r') as template_file:
+            template = template_file.read()
+            modified = template.replace('$$POINTS$$', points)
+            with open('visualize.html', 'w') as out_file:
+                out_file.write(modified)
+                print('wrote modified template')
+
+
+class CustomEncoder(json.JSONEncoder):
+    def __init__(self, *args, **kwargs):
+        self.precision = kwargs.pop('precision', 2)  # Default to 2 decimal places if not specified
+        super().__init__(*args, **kwargs)
+
+    def encode(self, o):
+        if isinstance(o, float):
+            return format(o, f'.{self.precision}f')
+        return super().encode(o)
 Scan().test()
