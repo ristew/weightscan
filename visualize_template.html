@@ -21,12 +21,14 @@
         document.body.appendChild(renderer.domElement);
       });
       const controls = new THREE.OrbitControls(camera, renderer.domElement);
-      camera.position.set(0, 0, 100);
-      POINTS.forEach(frame => {
+      camera.position.set(-10, -10, -10);
+      camera.lookAt(new THREE.Vector3(0, 0, 0))
+      POINTS.forEach((frame, i) => {
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(frame.flat());
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const material = new THREE.PointsMaterial({ color: 0xA9809B });
+        const color = 0x6F6F00 + (i * 256 / 33);
+        const material = new THREE.PointsMaterial({ color });
         const points = new THREE.Points(geometry, material);
         scene.add(points);
       });

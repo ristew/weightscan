@@ -16,7 +16,7 @@ import seaborn as sns
 
 
 class TransformerAutoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1000, 8)):
+    def __init__(self, input_dim, compressed_dim=(1024, 8)):
         super(TransformerAutoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
@@ -46,8 +46,8 @@ class Scan():
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 50
-        # self.prompt = '''A B A A => A A\nB A B A B => B\nA A B B => A'''
-        self.prompt = 'jesus'
+        self.prompt = '''A B A A => A A\nB A B A B => B\nA A B B =>'''
+        # self.prompt = 'jesus'
 
     def gemma(self):
         return self.model_name == 'google/gemma-2b'
@@ -76,17 +76,19 @@ class Scan():
         autoencoder = TransformerAutoencoder(input_dim=self.normed_states[0][0][0].size()[0])
         num_epochs = 10
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0001)
-        for data in self.normed_states:
-            print('data', data.shape)
-            optimizer.zero_grad()
-            encoded, decoded = autoencoder(data.float())
-            loss = criterion(decoded, data.float())
-            print('loss', loss)
-            loss.backward(retain_graph=True)
-            optimizer.step()
+        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0002)
+        for i in range(num_epochs):
+            for data in self.normed_states:
+                print('data', data.shape)
+                optimizer.zero_grad()
+                encoded, decoded = autoencoder(data.float())
+                loss = criterion(decoded, data.float())
+                print('loss', loss)
+                loss.backward(retain_graph=True)
+                optimizer.step()
 
         res = [autoencoder(n.float())[0] for n in self.normed_states]
+        print('autoencoded', res)
         return res
 
     def embed(self):
@@ -106,7 +108,7 @@ class Scan():
     def plot_embedding(self, embedding, layer_id):
         plt.figure(figsize=(10, 10))
         ax = sns.kdeplot(x=embedding[:, 0], y=embedding[:, 1], cmap="mako", levels=50)
-        plt.scatter(x=embedding[:, 0], y=embedding[:, 2], c="white", edgecolors="white")
+        plt.scatter(x=embedding[:, 0], y=embedding[:, 1], c="white", edgecolors="white")
 
         ax.set_facecolor('black')
         plt.gcf().set_facecolor('black')
@@ -137,7 +139,9 @@ class Scan():
     def test(self):
         output = self.forward()
         self.get_normed_states(output)
+        # embeddings = [p.squeeze().cpu().detach().numpy() for p in self.autoencode()]
         embeddings = self.embed()
+        print('embeddings', embeddings)
         self.global_x_min = min(embedding[:, 0].min() for embedding in embeddings)
         self.global_x_max = max(embedding[:, 0].max() for embedding in embeddings)
         self.global_y_min = min(embedding[:, 1].min() for embedding in embeddings)
@@ -153,7 +157,7 @@ class Scan():
             images.append(self.plot_embedding(embedding, i))
 
         imageio.mimsave('hidden_states.mp4', images, format='MP4', fps=2)
-        points = json.dumps([(p * 20).tolist() for p in embeddings], cls=CustomEncoder, precision=4)
+        points = json.dumps([(p * 16).tolist() for p in embeddings])
 
         print(points)
         with open('visualize_template.html', 'r') as template_file:
@@ -163,14 +167,4 @@ class Scan():
                 out_file.write(modified)
                 print('wrote modified template')
 
-
-class CustomEncoder(json.JSONEncoder):
-    def __init__(self, *args, **kwargs):
-        self.precision = kwargs.pop('precision', 2)  # Default to 2 decimal places if not specified
-        super().__init__(*args, **kwargs)
-
-    def encode(self, o):
-        if isinstance(o, float):
-            return format(o, f'.{self.precision}f')
-        return super().encode(o)
 Scan().test()
