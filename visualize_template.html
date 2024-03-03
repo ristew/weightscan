@@ -13,7 +13,9 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.126.1/examples/js/controls/OrbitControls.js"></script>
     <script>
       const POINTS = $$POINTS$$;
+
       const scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x000000, 0.005);
       const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
       const renderer = new THREE.WebGLRenderer();
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -22,22 +24,80 @@
       });
       const controls = new THREE.OrbitControls(camera, renderer.domElement);
       camera.position.set(-10, -10, -10);
-      camera.lookAt(new THREE.Vector3(0, 0, 0))
-      POINTS.forEach((frame, i) => {
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(frame.flat());
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const color = 0x6F6F00 + (i * 256 / 33);
-        const material = new THREE.PointsMaterial({ color });
-        const points = new THREE.Points(geometry, material);
-        scene.add(points);
-      });
+      camera.lookAt(new THREE.Vector3(0, 0, 0));
 
+      let currentFrameIndex = 0;
+      let lastSwitchTime = performance.now();
+      const frameDuration = 500; // Frame duration in milliseconds
+      function distance(point1, point2) {
+        const dx = point1[0] - point2[0];
+        const dy = point1[1] - point2[1];
+        const dz = point1[2] - point2[2];
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+
+      // Function to find the three nearest neighbors of each point
+      function findNearestNeighbors(points) {
+        return points.map((point, index) => {
+          const distances = points.map((otherPoint, otherIndex) => ({
+            index: otherIndex,
+            distance: distance(point, otherPoint),
+          })).filter(d => d.index !== index); // Exclude the point itself
+          distances.sort((a, b) => a.distance - b.distance);
+          return distances.slice(0, 3).map(d => d.index); // Return indexes of the three nearest neighbors
+        });
+      }
+      // Calculate nearest neighbors and add lines
+      const neighbors = POINTS.map(findNearestNeighbors);
+
+      // Modify animate function to include logic for adding lines
       function animate() {
         requestAnimationFrame(animate);
-        controls.update(); // Only required if controls.enableDamping = true, or if controls.autoRotate = true
+
+        const now = performance.now();
+        if (now - lastSwitchTime > frameDuration) {
+          lastSwitchTime = now;
+
+          // Remove the previous frame's points and lines
+          while(scene.children.length > 0){
+            scene.remove(scene.children[0]);
+          }
+
+          // Add the new frame's points
+          const frame = POINTS[currentFrameIndex];
+          const geometry = new THREE.BufferGeometry();
+          const positions = new Float32Array(frame.flat());
+          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          const material = new THREE.PointsMaterial({
+            color: 0xCCCCCC,
+            size: 1.5,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.8
+          });
+          const points = new THREE.Points(geometry, material);
+          scene.add(points);
+          neighbors[currentFrameIndex].forEach((neighborIndexes, pointIndex) => {
+            const point = frame[pointIndex];
+            neighborIndexes.forEach(neighborIndex => {
+              const neighborPoint = frame[neighborIndex];
+              const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(...point),
+                new THREE.Vector3(...neighborPoint)
+              ]);
+              const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: 0xffffff }));
+              scene.add(line);
+            });
+          });
+
+          // Update the frame index
+          currentFrameIndex = (currentFrameIndex + 1) % POINTS.length;
+        }
+
+        controls.update();
         renderer.render(scene, camera);
       }
+
       animate();
     </script>
   </head>

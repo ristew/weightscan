@@ -16,7 +16,7 @@ import seaborn as sns
 
 
 class TransformerAutoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 8)):
+    def __init__(self, input_dim, compressed_dim=(2048, 16)):
         super(TransformerAutoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
@@ -38,16 +38,12 @@ class Scan():
     def __init__(self):
         torch.set_default_device('cuda')
         torch.set_float32_matmul_precision('medium')
-        # model_name = 'MistralAI/Mistral-7B-v0.1'
-        # self.model_name = 'google/gemma-2b'
         self.model_name = 'microsoft/phi-2'
-        # self.model_name = 'stabilityai/stablelm-3b-4e1t'
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 50
-        self.prompt = '''A B A A => A A\nB A B A B => B\nA A B B =>'''
-        # self.prompt = 'jesus'
+        self.prompt = '''After breakfast, I decided it was time to'''
 
     def gemma(self):
         return self.model_name == 'google/gemma-2b'
