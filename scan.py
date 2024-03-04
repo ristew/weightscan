@@ -70,7 +70,7 @@ class Scan():
 
     def autoencode(self):
         autoencoder = TransformerAutoencoder(input_dim=self.normed_states[0][0][0].size()[0])
-        num_epochs = 10
+        num_epochs = 4
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0002)
         for i in range(num_epochs):

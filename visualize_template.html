@@ -9,9 +9,17 @@
       body { margin: 0; }
       canvas { display: block; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.126.1/build/three.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.126.1/examples/js/controls/OrbitControls.js"></script>
-    <script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
       const POINTS = $$POINTS$$;
 
       const scene = new THREE.Scene();
@@ -22,9 +30,22 @@
       document.addEventListener('DOMContentLoaded', function() {
         document.body.appendChild(renderer.domElement);
       });
-      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      const controls = new OrbitControls(camera, renderer.domElement);
       camera.position.set(-10, -10, -10);
       camera.lookAt(new THREE.Vector3(0, 0, 0));
+      function calculateCenter(frame) {
+        const sum = frame.reduce((acc, val) => {
+          acc[0] += val[0];
+          acc[1] += val[1];
+          acc[2] += val[2];
+          return acc;
+        }, [0, 0, 0]);
+        return sum.map(s => s / frame.length);
+      }
+      const center = calculateCenter(POINTS[0]);
+      console.log('center', center);
+      controls.target.set(...center);
+      controls.update();
 
       let currentFrameIndex = 0;
       let lastSwitchTime = performance.now();
@@ -44,7 +65,17 @@
             distance: distance(point, otherPoint),
           })).filter(d => d.index !== index); // Exclude the point itself
           distances.sort((a, b) => a.distance - b.distance);
-          return distances.slice(0, 3).map(d => d.index); // Return indexes of the three nearest neighbors
+          return distances
+            .slice(0, 3)
+            .map(d => d.index)
+            .map(neighborIndex => {
+              const neighborPoint = points[neighborIndex];
+              const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(...point),
+                new THREE.Vector3(...neighborPoint)
+              ]);
+              return new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: 0xffffff }));
+            });
         });
       }
       // Calculate nearest neighbors and add lines
@@ -77,23 +108,16 @@
           });
           const points = new THREE.Points(geometry, material);
           scene.add(points);
-          neighbors[currentFrameIndex].forEach((neighborIndexes, pointIndex) => {
-            const point = frame[pointIndex];
-            neighborIndexes.forEach(neighborIndex => {
-              const neighborPoint = frame[neighborIndex];
-              const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(...point),
-                new THREE.Vector3(...neighborPoint)
-              ]);
-              const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: 0xffffff }));
+          for (const neighbor of neighbors[currentFrameIndex]) {
+            for (const line of neighbor) {
               scene.add(line);
-            });
-          });
+            }
+          }
 
-          // Update the frame index
           currentFrameIndex = (currentFrameIndex + 1) % POINTS.length;
         }
 
+        controls.target.set(...center);
         controls.update();
         renderer.render(scene, camera);
       }
