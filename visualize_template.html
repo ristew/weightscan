@@ -60,21 +60,28 @@
       // Function to find the three nearest neighbors of each point
       function findNearestNeighbors(points) {
         return points.map((point, index) => {
-          const distances = points.map((otherPoint, otherIndex) => ({
-            index: otherIndex,
-            distance: distance(point, otherPoint),
-          })).filter(d => d.index !== index); // Exclude the point itself
+          let maxDist = 0;
+          const distances = points.map((otherPoint, otherIndex) => {
+            const pd = distance(point, otherPoint);
+            if (pd > maxDist) {
+              maxDist = pd;
+            }
+            return {
+              index: otherIndex,
+              distance: pd,
+            };
+          }).filter(d => d.index !== index); // Exclude the point itself
           distances.sort((a, b) => a.distance - b.distance);
           return distances
             .slice(0, 3)
-            .map(d => d.index)
-            .map(neighborIndex => {
-              const neighborPoint = points[neighborIndex];
+            .map(di => {
+              const neighborPoint = points[di.index];
               const lineGeometry = new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(...point),
                 new THREE.Vector3(...neighborPoint)
               ]);
-              return new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: 0xffffff }));
+              const distrat = Math.pow(1.0 - di.distance / maxDist, 2);
+              return new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: new THREE.Color(distrat, distrat, distrat) }));
             });
         });
       }
