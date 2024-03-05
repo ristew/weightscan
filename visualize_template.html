@@ -8,6 +8,11 @@
     <style>
       body { margin: 0; }
       canvas { display: block; }
+      #info {
+        position: absolute;
+        color: white;
+        background-color: rgba(0, 0, 0, 0.5);
+      }
     </style>
     <script type="importmap">
       {
@@ -23,7 +28,7 @@
       const POINTS = $$POINTS$$;
 
       const scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0x000000, 0.005);
+      scene.fog = new THREE.FogExp2(0x000000, 0.001);
       const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
       const renderer = new THREE.WebGLRenderer();
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -120,6 +125,7 @@
               scene.add(line);
             }
           }
+          document.getElementById('info').textContent = `frame ${currentFrameIndex}`;
 
           currentFrameIndex = (currentFrameIndex + 1) % POINTS.length;
         }
@@ -133,5 +139,6 @@
     </script>
   </head>
   <body>
+    <div id="info"></div>
   </body>
 </html>

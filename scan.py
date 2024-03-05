@@ -9,33 +9,42 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from umap import UMAP
+from umap.aligned_umap import AlignedUMAP
 import matplotlib.pyplot as plt
 from PIL import Image
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
 import seaborn as sns
+from scipy.spatial import Delaunay
 
 
 class TransformerAutoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(2048, 16)):
+    def __init__(self, input_dim, compressed_dim=(1024, 16)):
         super(TransformerAutoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
+        self.hidden_dim = 256
         self.global_pool = nn.AdaptiveAvgPool1d(1)
-        self.encoder_fc = nn.Linear(input_dim, compressed_dim[0] * compressed_dim[1])
-        self.decoder_fc = nn.Linear(compressed_dim[0] * compressed_dim[1], input_dim)
+        self.encoder_input = nn.Linear(input_dim, self.hidden_dim)
+        self.encoder_output = nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1])
+        self.decoder_input = nn.Linear(compressed_dim[0] * compressed_dim[1], self.hidden_dim)
+        self.decoder_output = nn.Linear(self.hidden_dim, input_dim)
 
     def forward(self, x):
         # x shape: [batch_size, seq_length, input_dim]
         x_pooled = self.global_pool(x.transpose(1, 2))
         x_pooled = x_pooled.squeeze(-1)
-        encoded = self.encoder_fc(x_pooled)
-        encoded = encoded.view(-1, self.compressed_dim[0], self.compressed_dim[1])
-        decoded = self.decoder_fc(encoded.view(-1, self.compressed_dim[0] * self.compressed_dim[1]))
-        decoded = decoded.view(-1, self.input_dim)
+        a = self.encoder_input(x_pooled)
+        a = torch.relu(a)
+        a = self.encoder_output(a)
+        encoded = a.view(-1, self.compressed_dim[0], self.compressed_dim[1])
+        b = self.decoder_input(a)
+        b = torch.relu(b)
+        b = self.decoder_output(b)
+        decoded = b.view(-1, self.input_dim)
         return encoded, decoded
 
 class Scan():
-    def __init__(self):
+    def __init__(self, prompt):
         torch.set_default_device('cuda')
         torch.set_float32_matmul_precision('medium')
         self.model_name = 'microsoft/phi-2'
@@ -43,7 +52,7 @@ class Scan():
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 50
-        self.prompt = '''After breakfast, I decided it was time to'''
+        self.prompt = prompt
 
     def gemma(self):
         return self.model_name == 'google/gemma-2b'
@@ -56,7 +65,9 @@ class Scan():
     def forward(self):
         enc = self.tokenizer(self.prompt, return_tensors='pt', return_attention_mask=False)
         input_ids = enc['input_ids'].to('cuda')
-        return self.model.forward(input_ids, output_hidden_states=True)
+        output = self.model.forward(input_ids, output_hidden_states=True)
+        self.get_normed_states(output)
+        self.embeddings = self.embed()
 
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
@@ -75,11 +86,10 @@ class Scan():
         optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0002)
         for i in range(num_epochs):
             for data in self.normed_states:
-                print('data', data.shape)
                 optimizer.zero_grad()
                 encoded, decoded = autoencoder(data.float())
                 loss = criterion(decoded, data.float())
-                print('loss', loss)
+                # print('loss', loss)
                 loss.backward(retain_graph=True)
                 optimizer.step()
 
@@ -132,11 +142,7 @@ class Scan():
         return Image.open(buf)
 
 
-    def test(self):
-        output = self.forward()
-        self.get_normed_states(output)
-        # embeddings = [p.squeeze().cpu().detach().numpy() for p in self.autoencode()]
-        embeddings = self.embed()
+    def kdemov(self):
         print('embeddings', embeddings)
         self.global_x_min = min(embedding[:, 0].min() for embedding in embeddings)
         self.global_x_max = max(embedding[:, 0].max() for embedding in embeddings)
@@ -153,14 +159,20 @@ class Scan():
             images.append(self.plot_embedding(embedding, i))
 
         imageio.mimsave('hidden_states.mp4', images, format='MP4', fps=2)
-        points = json.dumps([(p * 16).tolist() for p in embeddings])
 
-        print(points)
+    def visualize(self):
+        points = [(p * 16).tolist() for p in self.embeddings]
+        data = json.dumps(points)
         with open('visualize_template.html', 'r') as template_file:
             template = template_file.read()
-            modified = template.replace('$$POINTS$$', points)
+            modified = template.replace('$$POINTS$$', data)
             with open('visualize.html', 'w') as out_file:
                 out_file.write(modified)
                 print('wrote modified template')
 
-Scan().test()
+    def test(self):
+        self.forward()
+        self.visualize()
+
+if __name__ == '__main__':
+    Scan('If only my love').test()
