@@ -10,19 +10,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 from umap import UMAP
 from umap.aligned_umap import AlignedUMAP
+import kmapper as km
 import matplotlib.pyplot as plt
 from PIL import Image
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
 import seaborn as sns
 from scipy.spatial import Delaunay
+import open3d as o3d
 
 
 class TransformerAutoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 16)):
+    def __init__(self, input_dim, compressed_dim=(768, 16)):
         super(TransformerAutoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = 256
+        self.hidden_dim = 512
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.encoder_input = nn.Linear(input_dim, self.hidden_dim)
         self.encoder_output = nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1])
@@ -47,11 +49,11 @@ class Scan():
     def __init__(self, prompt):
         torch.set_default_device('cuda')
         torch.set_float32_matmul_precision('medium')
-        self.model_name = 'microsoft/phi-2'
+        self.model_name = 'stabilityai/stablelm-2-1_6b'
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
-        self.top_k = 50
+        self.top_k = 5
         self.prompt = prompt
 
     def gemma(self):
@@ -83,21 +85,22 @@ class Scan():
         autoencoder = TransformerAutoencoder(input_dim=self.normed_states[0][0][0].size()[0])
         num_epochs = 4
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0002)
+        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0003)
         for i in range(num_epochs):
             for data in self.normed_states:
                 optimizer.zero_grad()
                 encoded, decoded = autoencoder(data.float())
                 loss = criterion(decoded, data.float())
-                # print('loss', loss)
                 loss.backward(retain_graph=True)
                 optimizer.step()
+                print('loss', loss)
 
         res = [autoencoder(n.float())[0] for n in self.normed_states]
         print('autoencoded', res)
         return res
 
     def embed(self):
+        # what if we ran each of the intermediate layers through the final layer?
         basis = torch.stack(self.autoencode()).squeeze()
         print('fit basis', basis.shape)
         reducer = UMAP(n_components=3, metric='cosine', min_dist=0).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
@@ -108,61 +111,20 @@ class Scan():
         return self.model.lm_head(self.normed_states[layer].unsqueeze(0)).float()
 
     def logprobs(self, layer=-1):
-        probs = F.softmax(self.logits(layer)[0], dim=-1)
+        logits = self.logits(layer)
+        probs = F.softmax(logits[0], dim=-1)
+        print('logprobs', logits.shape, probs.shape)
         return torch.topk(probs[0, -1, :], self.top_k)
 
-    def plot_embedding(self, embedding, layer_id):
-        plt.figure(figsize=(10, 10))
-        ax = sns.kdeplot(x=embedding[:, 0], y=embedding[:, 1], cmap="mako", levels=50)
-        plt.scatter(x=embedding[:, 0], y=embedding[:, 1], c="white", edgecolors="white")
-
-        ax.set_facecolor('black')
-        plt.gcf().set_facecolor('black')
-        ax.xaxis.label.set_color('white')
-        ax.yaxis.label.set_color('white')
-        ax.tick_params(axis='x', colors='white')
-        ax.tick_params(axis='y', colors='white')
-        ax.spines['bottom'].set_color('white')
-        ax.spines['left'].set_color('white')
-        ax.title.set_color('white')
-        plt.axis([self.global_x_min, self.global_x_max, self.global_y_min, self.global_y_max])
-        plt.title(f"layer {layer_id}")
+    def top_tokens(self, layer_id):
         top_probs, top_indices = self.logprobs(layer_id)
-        print(top_indices.shape)
-        top_tokens = [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
-        top_info = ", ".join([f"({repr(token)}, {prob:.2f})" for token, prob in top_tokens[:5]])
-        text_str = f"prompt: {repr(self.prompt)}\ntop_k({self.top_k}): {top_info}"
-        plt.text(self.global_x_min + 1, self.global_y_min + 1, text_str,
-                    verticalalignment='bottom', horizontalalignment='left',
-                    color='white', fontsize=10)
-        buf = BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        plt.close()
-        return Image.open(buf)
-
-
-    def kdemov(self):
-        print('embeddings', embeddings)
-        self.global_x_min = min(embedding[:, 0].min() for embedding in embeddings)
-        self.global_x_max = max(embedding[:, 0].max() for embedding in embeddings)
-        self.global_y_min = min(embedding[:, 1].min() for embedding in embeddings)
-        self.global_y_max = max(embedding[:, 1].max() for embedding in embeddings)
-        buffer = max(self.global_x_max - self.global_x_min, self.global_y_max - self.global_y_min) / 6
-        self.global_x_min -= buffer
-        self.global_x_max += buffer
-        self.global_y_min -= buffer
-        self.global_y_max += buffer
-        images = []
-        for i, embedding in enumerate(embeddings):
-            print(f'plot embedding {i}')
-            images.append(self.plot_embedding(embedding, i))
-
-        imageio.mimsave('hidden_states.mp4', images, format='MP4', fps=2)
+        print('top_tokens', top_probs.shape, top_indices.shape)
+        return [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
 
     def visualize(self):
-        points = [(p * 16).tolist() for p in self.embeddings]
-        data = json.dumps(points)
+        points = [(p * 12).tolist() for p in self.embeddings]
+        tops = [self.top_tokens(i) for i in range(len(self.embeddings))]
+        data = json.dumps({'points': points, 'tops': tops})
         with open('visualize_template.html', 'r') as template_file:
             template = template_file.read()
             modified = template.replace('$$POINTS$$', data)
@@ -175,4 +137,27 @@ class Scan():
         self.visualize()
 
 if __name__ == '__main__':
-    Scan('If only my love').test()
+    Scan('''Pattern matching
+
+input:
+0, 0, 0
+0, 1, 0
+0, 0, 0
+output:
+1, 0, 1
+0, 0, 0
+1, 0, 1
+input:
+0, 0, 0
+0, 9, 0
+0, 0, 0
+output:
+3, 0, 3
+0, 0, 0
+3, 0, 3
+input:
+0, 0, 0
+0, 4, 0
+0, 0, 0
+output:
+''').test()
