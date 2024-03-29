@@ -2,21 +2,13 @@ import datetime
 import os
 import math
 import json
-import imageio
-from io import BytesIO
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from umap import UMAP
 from umap.aligned_umap import AlignedUMAP
-import kmapper as km
-import matplotlib.pyplot as plt
-from PIL import Image
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
-import seaborn as sns
-from scipy.spatial import Delaunay
-import open3d as o3d
 
 
 class TransformerAutoencoder(nn.Module):
@@ -85,7 +77,7 @@ class Scan():
         autoencoder = TransformerAutoencoder(input_dim=self.normed_states[0][0][0].size()[0])
         num_epochs = 4
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0003)
+        optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0001)
         for i in range(num_epochs):
             for data in self.normed_states:
                 optimizer.zero_grad()
