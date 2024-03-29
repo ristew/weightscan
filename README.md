@@ -1,6 +1,7 @@
 ### weightscan
 
-What happens when you apply t-SNE to the hidden states of a transformer langauge model? In this case we take phi-2 and see how the layer state evolves as it goes through 32 layers, projecting the hidden state into 2 dimensions. What we get is a view into the geometric progression of the model as it predicts the next token.
+The goal is to run the hidden layers of a transformer (eg phi-2, stablelm2-1.6) through an autoencoder to get 1024 particles, then visualize the geometry of them with UMAP in 3d. Then, the points data is templated into a three.js visualization that highlights areas of shorter connections and the dynamics over layer-time.
 
-https://github.com/ristew/weightscan/assets/8388224/1847b6ed-3b53-46a2-9b6f-1e4558523f8c
+[demo](https://ristew.github.io/weightscan/visualize.html)
 
+controls: space to pause, [] to step, drag/scroll to control camera
