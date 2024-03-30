@@ -4,4 +4,25 @@ First, run the hidden layers of a transformer language model (by default stablel
 
 [demo](https://ristew.github.io/weightscan/visualize.html) (may take a bit to load)
 
+Demo prompt:
+
+    Pattern matching
+
+    input:
+    0, 0
+    0, 1
+    output:
+    1, 0
+    0, 0
+    input:
+    0, 0
+    0, 9
+    output:
+    3, 0
+    0, 0
+    input:
+    0, 0
+    0, 4
+    output:
+
 controls: space to pause, [] to step, drag/scroll to control camera
