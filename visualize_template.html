@@ -72,8 +72,10 @@
       function findNearestNeighbors(points) {
         return points.map((point, index) => {
           let maxDist = 0;
+          let totalDist = 0;
           const distances = points.map((otherPoint, otherIndex) => {
             const pd = distance(point, otherPoint);
+            totalDist += pd;
             if (pd > maxDist) {
               maxDist = pd;
             }
@@ -82,6 +84,7 @@
               distance: pd,
             };
           }).filter(d => d.index !== index); // Exclude the point itself
+          const averageDist = totalDist / points.length;
           distances.sort((a, b) => a.distance - b.distance);
           return distances
             .slice(0, 6)
@@ -91,7 +94,7 @@
                 new THREE.Vector3(...point),
                 new THREE.Vector3(...neighborPoint)
               ]);
-              const distrat = 1.0 - Math.min(di.distance / Math.sqrt(maxDist), 1);
+              const distrat = 1.0 - Math.min(0.5 * di.distance / Math.sqrt(averageDist), 1);
               return new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: new THREE.Color(distrat, 0, 1 - distrat) }));
             });
         });

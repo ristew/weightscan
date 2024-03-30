@@ -75,7 +75,7 @@ class Scan():
 
     def autoencode(self):
         autoencoder = TransformerAutoencoder(input_dim=self.normed_states[0][0][0].size()[0])
-        num_epochs = 4
+        num_epochs = 8
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(autoencoder.parameters(), lr=0.0001)
         for i in range(num_epochs):
@@ -95,7 +95,7 @@ class Scan():
         # what if we ran each of the intermediate layers through the final layer?
         basis = torch.stack(self.autoencode()).squeeze()
         print('fit basis', basis.shape)
-        reducer = UMAP(n_components=3, metric='cosine', min_dist=0).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
+        reducer = UMAP(n_components=3, metric='cosine', min_dist=0, n_neighbors=6).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
         print('reducer fit, transforming...')
         return [reducer.transform(state.cpu().detach().numpy()) for state in basis]
 
