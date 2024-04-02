@@ -36,6 +36,10 @@ class Scan():
         input_ids = enc['input_ids'].to('cuda')
         output = self.model.forward(input_ids, output_hidden_states=True)
         self.get_normed_states(output)
+        toks = self.normed_states[0]
+        chunks = torch.chunk(toks, toks.size(1), dim=1)
+        for c in chunks:
+            print('normed', nt.shape, self.top_tokens(c))
         self.embeddings = self.embed()
 
     def get_normed_states(self, output):
@@ -64,23 +68,23 @@ class Scan():
         print('reducer fit, transforming...')
         return [reducer.transform(state.cpu().detach().numpy()) for state in basis]
 
-    def logits(self, layer=-1):
-        return self.model.lm_head(self.normed_states[layer].unsqueeze(0)).float()
+    def logits(self, state):
+        return self.model.lm_head(state.unsqueeze(0)).float()
 
-    def logprobs(self, layer=-1):
-        logits = self.logits(layer)
+    def logprobs(self, state):
+        logits = self.logits(state)
         probs = F.softmax(logits[0], dim=-1)
         print('logprobs', logits.shape, probs.shape)
         return torch.topk(probs[0, -1, :], self.top_k)
 
-    def top_tokens(self, layer_id):
-        top_probs, top_indices = self.logprobs(layer_id)
+    def top_tokens(self, state):
+        top_probs, top_indices = self.logprobs(state)
         print('top_tokens', top_probs.shape, top_indices.shape)
         return [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
 
     def visualize(self):
-        points = [(p * self.autoencoder.compressed_dim[0] / 64).tolist() for p in self.embeddings]
-        tops = [self.top_tokens(i) for i in range(len(self.embeddings))]
+        points = [(p * self.autoencoder.compressed_dim[0]).tolist() for p in self.embeddings]
+        tops = [self.top_tokens(self.normed_states[i]) for i in range(len(self.embeddings))]
         data = json.dumps({'points': points, 'tops': tops})
         with open('visualize_template.html', 'r') as template_file:
             template = template_file.read()
