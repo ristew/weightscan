@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.neighbors import NearestNeighbors
 from umap import UMAP
 from umap.aligned_umap import AlignedUMAP
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
@@ -36,15 +37,15 @@ class Scan():
         input_ids = enc['input_ids'].to('cuda')
         output = self.model.forward(input_ids, output_hidden_states=True)
         self.get_normed_states(output)
-        toks = self.normed_states[0]
-        chunks = torch.chunk(toks, toks.size(1), dim=1)
-        for c in chunks:
-            print('normed', nt.shape, self.top_tokens(c))
+        # toks = self.normed_states[0]
+        # chunks = torch.chunk(toks, toks.size(1), dim=1)
+        # for c in chunks:
+        #     print('normed', nt.shape, self.top_tokens(c))
         self.embeddings = self.embed()
 
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
-        print(hidden_states[0][0].shape)
+        # print(hidden_states[0][0].shape)
         normed_states = [self.norm(hs) for hs in hidden_states[:-1]]
         # output layer is already normed
         final = hidden_states[-1]
@@ -57,7 +58,6 @@ class Scan():
         self.autoencoder.train(self.normed_states)
 
         res = [self.autoencoder(n.float())[0] for n in self.normed_states]
-        print('autoencoded', res)
         return res
 
     def embed(self):
@@ -82,10 +82,27 @@ class Scan():
         print('top_tokens', top_probs.shape, top_indices.shape)
         return [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
 
+    def find_nearest_neighbors(self, embeddings, n_neighbors=5):
+        nn = []
+        for layer in embeddings:
+            neighbors = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
+            neighbors.fit(layer)
+            distances, indices = neighbors.kneighbors(layer)
+            nn.append(indices.tolist())
+        return nn
+
     def visualize(self):
-        points = [(p * self.autoencoder.compressed_dim[0]).tolist() for p in self.embeddings]
+        points = [(p * 6).tolist() for p in self.embeddings]
         tops = [self.top_tokens(self.normed_states[i]) for i in range(len(self.embeddings))]
-        data = json.dumps({'points': points, 'tops': tops})
+        nn_indices = self.find_nearest_neighbors(points)
+
+        # Prepare data including nearest neighbors
+        data = json.dumps({
+            'points': points,
+            'tops': tops,
+            'prompt': self.prompt,
+            'neighbors': nn_indices
+        })
         with open('visualize_template.html', 'r') as template_file:
             template = template_file.read()
             modified = template.replace('$$POINTS$$', data)
@@ -98,22 +115,4 @@ class Scan():
         self.visualize()
 
 if __name__ == '__main__':
-    Scan('''Pattern matching
-
-input:
-0, 0
-0, 1
-output:
-1, 0
-0, 0
-input:
-0, 0
-0, 9
-output:
-3, 0
-0, 0
-input:
-0, 0
-0, 4
-output:
-''').test()
+    Scan('''Continue the sequence: 1, 2, 4, ''').test()

@@ -32,6 +32,7 @@ class Autoencoder(nn.Module):
         return encoded, decoded
 
     def train(self, training_set):
+        print('training autoencoder')
         optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
         for i in range(self.num_epochs):
             for data in training_set:
@@ -40,4 +41,4 @@ class Autoencoder(nn.Module):
                 loss = self.criterion(decoded, data.float())
                 loss.backward(retain_graph=True)
                 optimizer.step()
-                print('loss', loss)
+        print('autoencoder trained')

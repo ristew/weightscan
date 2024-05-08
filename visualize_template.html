@@ -16,6 +16,9 @@
       #tops-info {
         top: 1.5em;
       }
+      #prompt-info {
+        top: 3em;
+      }
     </style>
     <script type="importmap">
       {
@@ -31,10 +34,13 @@
       const DATA = $$POINTS$$;
       const POINTS = DATA.points;
       const TOPS = DATA.tops;
-      console.log(TOPS);
+      const PROMPT = DATA.prompt;
+      const NEIGHBORS = DATA.neighbors;
+      console.log('neighbors', DATA);
+      document.getElementById('prompt-info').textContent = 'prompt: ' + PROMPT;
 
       const scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0x000000, 0.001);
+      scene.fog = new THREE.FogExp2(0x000000, 0.01);
       const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
       const renderer = new THREE.WebGLRenderer();
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -57,52 +63,41 @@
       console.log('center', center);
       controls.target.set(...center);
       controls.update();
-
       let currentFrameIndex = 0;
       let lastSwitchTime = performance.now();
       const frameDuration = 500; // Frame duration in milliseconds
-      function distance(point1, point2) {
-        const dx = point1[0] - point2[0];
-        const dy = point1[1] - point2[1];
-        const dz = point1[2] - point2[2];
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
-      }
-
-      // Function to find the three nearest neighbors of each point
-      function findNearestNeighbors(points) {
-        return points.map((point, index) => {
-          let maxDist = 0;
-          let totalDist = 0;
-          const distances = points.map((otherPoint, otherIndex) => {
-            const pd = distance(point, otherPoint);
-            totalDist += pd;
-            if (pd > maxDist) {
-              maxDist = pd;
-            }
-            return {
-              index: otherIndex,
-              distance: pd,
-            };
-          }).filter(d => d.index !== index); // Exclude the point itself
-          const averageDist = totalDist / points.length;
-          distances.sort((a, b) => a.distance - b.distance);
-          return distances
-            .slice(0, 6)
-            .map(di => {
-              const neighborPoint = points[di.index];
-              const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(...point),
-                new THREE.Vector3(...neighborPoint)
-              ]);
-              const distrat = 1.0 - Math.min(0.5 * di.distance / Math.sqrt(averageDist), 1);
-              return new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: new THREE.Color(distrat, 0, 1 - distrat) }));
-            });
-        });
-      }
-      // Calculate nearest neighbors and add lines
-      const neighbors = POINTS.map(findNearestNeighbors);
       let running = true;
       let step = 0;
+
+      function drawFrame(frameIdx, color) {
+        const frame = POINTS[frameIdx];
+        const neighbors = NEIGHBORS[frameIdx];
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(frame.flat());
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({
+          color,
+          size: 0.5,
+          sizeAttenuation: true,
+          transparent: true,
+          opacity: 0.8
+        });
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        for (const pointIdx in frame) {
+          for (const neighborIdx of neighbors[pointIdx]) {
+            const neighborPoint = frame[neighborIdx];
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(...frame[pointIdx]),
+              new THREE.Vector3(...neighborPoint)
+            ]);
+            // const distrat = 1.0 - Math.min(0.5 * di.distance / Math.sqrt(averageDist), 1);
+
+            const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: new THREE.Color(0xAA6699) }));
+            scene.add(line);
+          }
+        }
+      }
 
       // Modify animate function to include logic for adding lines
       function animate() {
@@ -117,25 +112,7 @@
             scene.remove(scene.children[0]);
           }
 
-          // Add the new frame's points
-          const frame = POINTS[currentFrameIndex];
-          const geometry = new THREE.BufferGeometry();
-          const positions = new Float32Array(frame.flat());
-          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-          const material = new THREE.PointsMaterial({
-            color: 0xCCCCCC,
-            size: 0.5,
-            sizeAttenuation: true,
-            transparent: true,
-            opacity: 0.8
-          });
-          const points = new THREE.Points(geometry, material);
-          scene.add(points);
-          for (const neighbor of neighbors[currentFrameIndex]) {
-            for (const line of neighbor) {
-              scene.add(line);
-            }
-          }
+          drawFrame(currentFrameIndex, 0xDDDDDD);
           document.getElementById('frame-info').textContent = `frame ${currentFrameIndex}`;
           document.getElementById('tops-info').textContent = TOPS[currentFrameIndex].map(top => {
             return `'${top[0]}' = ${top[1].toFixed(3)}\n`;
@@ -181,5 +158,6 @@
   <body>
     <div id="frame-info" class="info"></div>
     <div id="tops-info" class="info"></div>
+    <div id="prompt-info" class="info"></div>
   </body>
 </html>
