@@ -17,7 +17,7 @@ class Scan():
     def __init__(self, prompt):
         torch.set_default_device('cuda')
         torch.set_float32_matmul_precision('medium')
-        self.model_name = 'stabilityai/stablelm-2-1_6b'
+        self.model_name = 'microsoft/Phi-3-mini-4k-instruct'
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
@@ -64,7 +64,7 @@ class Scan():
         # what if we ran each of the intermediate layers through the final layer?
         basis = torch.stack(self.autoencode()).squeeze()
         print('fit basis', basis.shape)
-        reducer = UMAP(n_components=3, metric='cosine', min_dist=0).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
+        reducer = UMAP(n_components=3, metric='cosine', min_dist=0, n_neighbors=50).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
         print('reducer fit, transforming...')
         return [reducer.transform(state.cpu().detach().numpy()) for state in basis]
 
@@ -74,21 +74,19 @@ class Scan():
     def logprobs(self, state):
         logits = self.logits(state)
         probs = F.softmax(logits[0], dim=-1)
-        print('logprobs', logits.shape, probs.shape)
         return torch.topk(probs[0, -1, :], self.top_k)
 
     def top_tokens(self, state):
         top_probs, top_indices = self.logprobs(state)
-        print('top_tokens', top_probs.shape, top_indices.shape)
         return [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
 
-    def find_nearest_neighbors(self, embeddings, n_neighbors=5):
+    def find_nearest_neighbors(self, embeddings, n_neighbors=4):
         nn = []
         for layer in embeddings:
             neighbors = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
             neighbors.fit(layer)
             distances, indices = neighbors.kneighbors(layer)
-            nn.append(indices.tolist())
+            nn.append([list(zip(indices[i].tolist(), distances[i].tolist()))[1:] for i in range(len(distances))])
         return nn
 
     def visualize(self):

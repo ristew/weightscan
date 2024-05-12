@@ -33,7 +33,7 @@ class Autoencoder(nn.Module):
 
     def train(self, training_set):
         print('training autoencoder')
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.00001)
         for i in range(self.num_epochs):
             for data in training_set:
                 optimizer.zero_grad()

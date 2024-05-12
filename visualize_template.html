@@ -65,27 +65,40 @@
       controls.update();
       let currentFrameIndex = 0;
       let lastSwitchTime = performance.now();
-      const frameDuration = 500; // Frame duration in milliseconds
+      const frameDuration = 400; // Frame duration in milliseconds
       let running = true;
       let step = 0;
+      let maxDist = 0;
+      for (const point of NEIGHBORS[1]) { // just use second layer
+        for (const neighborPair of point) {
+          if (neighborPair[1] > maxDist) {
+            maxDist = neighborPair[1];
+          }
+        }
+      }
 
-      function drawFrame(frameIdx, color) {
+      const layers = [];
+      function frameObjects(frameIdx) {
+        const objects = [];
         const frame = POINTS[frameIdx];
         const neighbors = NEIGHBORS[frameIdx];
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(frame.flat());
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         const material = new THREE.PointsMaterial({
-          color,
+          color: 0xDDDDDD,
           size: 0.5,
           sizeAttenuation: true,
           transparent: true,
           opacity: 0.8
         });
         const points = new THREE.Points(geometry, material);
-        scene.add(points);
+        // objects.push(points);
         for (const pointIdx in frame) {
-          for (const neighborIdx of neighbors[pointIdx]) {
+          for (const neighborPair of neighbors[pointIdx]) {
+            const neighborIdx = neighborPair[0];
+            const neighborDist = neighborPair[1];
+            const neighborWeight = Math.pow(1 - neighborDist / maxDist, 2);
             const neighborPoint = frame[neighborIdx];
             const lineGeometry = new THREE.BufferGeometry().setFromPoints([
               new THREE.Vector3(...frame[pointIdx]),
@@ -93,10 +106,14 @@
             ]);
             // const distrat = 1.0 - Math.min(0.5 * di.distance / Math.sqrt(averageDist), 1);
 
-            const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: new THREE.Color(0xAA6699) }));
-            scene.add(line);
+            const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: new THREE.Color(neighborWeight, 0.0, 0.2 - 0.2 * neighborWeight) }));
+            objects.push(line);
           }
         }
+        return objects;
+      }
+      for (const idx in POINTS) {
+        layers.push(frameObjects(idx));
       }
 
       // Modify animate function to include logic for adding lines
@@ -112,7 +129,9 @@
             scene.remove(scene.children[0]);
           }
 
-          drawFrame(currentFrameIndex, 0xDDDDDD);
+          for (const obj of layers[currentFrameIndex]) {
+            scene.add(obj);
+          }
           document.getElementById('frame-info').textContent = `frame ${currentFrameIndex}`;
           document.getElementById('tops-info').textContent = TOPS[currentFrameIndex].map(top => {
             return `'${top[0]}' = ${top[1].toFixed(3)}\n`;
