@@ -4,13 +4,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 16)):
+    def __init__(self, input_dim, compressed_dim=(1024, 16), sparsity_target=0.1, sparsity_weight=0.001):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
         self.hidden_dim = 512
         self.num_epochs = 8
         self.criterion = nn.MSELoss()
+        self.sparsity_target = sparsity_target
+        self.sparsity_weight = sparsity_weight
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.encoder_input = nn.Linear(input_dim, self.hidden_dim)
         self.encoder_output = nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1])
@@ -18,7 +20,6 @@ class Autoencoder(nn.Module):
         self.decoder_output = nn.Linear(self.hidden_dim, input_dim)
 
     def forward(self, x):
-        # x shape: [batch_size, seq_length, input_dim]
         x_pooled = self.global_pool(x.transpose(1, 2))
         x_pooled = x_pooled.squeeze(-1)
         a = self.encoder_input(x_pooled)
@@ -31,14 +32,23 @@ class Autoencoder(nn.Module):
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded
 
+    def sparsity_penalty(self, encoded):
+        mean_activation = torch.mean(encoded, dim=0)
+        target = torch.full_like(mean_activation, self.sparsity_target)
+        log_mean_activation = F.log_softmax(mean_activation, dim=0)
+        kl_div = F.kl_div(log_mean_activation, target, reduction='sum')
+        return kl_div
+
     def train(self, training_set):
-        print('training autoencoder')
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.00001)
-        for i in range(self.num_epochs):
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
+        for epoch in range(self.num_epochs):
             for data in training_set:
                 optimizer.zero_grad()
                 encoded, decoded = self(data.float())
                 loss = self.criterion(decoded, data.float())
-                loss.backward(retain_graph=True)
+                sparsity_loss = self.sparsity_penalty(encoded)
+                print('sparsity loss', sparsity_loss)
+                total_loss = loss + self.sparsity_weight * sparsity_loss
+                total_loss.backward(retain_graph=True)  # Retain graph if necessary
                 optimizer.step()
-        print('autoencoder trained')
+            print(f'Epoch {epoch+1}, Loss: {total_loss.item()}')
