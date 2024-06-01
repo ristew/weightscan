@@ -68,14 +68,6 @@
       const frameDuration = 400; // Frame duration in milliseconds
       let running = true;
       let step = 0;
-      let maxDist = 0;
-      for (const point of NEIGHBORS[1]) { // just use second layer
-        for (const neighborPair of point) {
-          if (neighborPair[1] > maxDist) {
-            maxDist = neighborPair[1];
-          }
-        }
-      }
 
       const layers = [];
       function frameObjects(frameIdx) {
@@ -93,6 +85,14 @@
           opacity: 0.8
         });
         const points = new THREE.Points(geometry, material);
+        let maxDist = 0;
+        for (const point of neighbors) { // just use second layer
+          for (const neighborPair of point) {
+            if (neighborPair[1] > maxDist) {
+              maxDist = neighborPair[1];
+            }
+          }
+        }
         // objects.push(points);
         for (const pointIdx in frame) {
           for (const neighborPair of neighbors[pointIdx]) {

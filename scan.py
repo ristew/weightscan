@@ -1,6 +1,7 @@
 import datetime
 import os
 import math
+import jax.random as random
 import json
 import numpy as np
 import torch
@@ -8,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.neighbors import NearestNeighbors
 from umap import UMAP
+from trimap import TriMap
 from umap.aligned_umap import AlignedUMAP
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
 from autoencoder import Autoencoder
@@ -64,9 +66,11 @@ class Scan():
         # what if we ran each of the intermediate layers through the final layer?
         basis = torch.stack(self.autoencode()).squeeze()
         print('fit basis', basis.shape)
-        reducer = UMAP(n_components=3, metric='cosine', min_dist=0, n_neighbors=50).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
+        # reducer = UMAP(n_components=3, metric='cosine', min_dist=0, n_neighbors=50).fit(basis.cpu().detach().numpy().reshape(-1, basis.size(-1)))
+        key = random.PRNGKey(42)
+        reducer = TriMap(n_dims=3, distance='cosine').fit(key, basis[1].cpu().detach().numpy())
         print('reducer fit, transforming...')
-        return [reducer.transform(state.cpu().detach().numpy()) for state in basis]
+        return [reducer.transform(key, state.cpu().detach().numpy()) for state in basis]
 
     def logits(self, state):
         return self.model.lm_head(state.unsqueeze(0)).float()
@@ -90,7 +94,7 @@ class Scan():
         return nn
 
     def visualize(self):
-        points = [(p * 6).tolist() for p in self.embeddings]
+        points = [(p / 10).tolist() for p in self.embeddings]
         tops = [self.top_tokens(self.normed_states[i]) for i in range(len(self.embeddings))]
         nn_indices = self.find_nearest_neighbors(points)
 
@@ -113,4 +117,4 @@ class Scan():
         self.visualize()
 
 if __name__ == '__main__':
-    Scan('''Continue the sequence: 1, 2, 4, ''').test()
+    Scan('''<|user|>\nParis is to France as Berlin is to:<|end|>\n<|assistant|>Answer:''').test()
