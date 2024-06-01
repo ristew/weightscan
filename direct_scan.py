@@ -49,7 +49,7 @@ class Scan():
 
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
-        # print(hidden_states[0][0].shape)
+        print('hidden state shape', hidden_states[0][0].shape)
         normed_states = [self.norm(hs) for hs in hidden_states[:-1]]
         # output layer is already normed
         final = hidden_states[-1]
@@ -65,6 +65,7 @@ class Scan():
             sparsity_weight=0.01,
             temporal_weight=1e5,
             lr=0.005,
+            num_epochs=4,
         )
         self.autoencoder.train(self.normed_states)
 

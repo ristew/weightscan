@@ -4,12 +4,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 16), sparsity_target=0.001, sparsity_weight=0.01, temporal_weight=1e6, lr=0.001):
+    def __init__(self, input_dim, compressed_dim=(1024, 16), sparsity_target=0.001, sparsity_weight=0.01, temporal_weight=1e6, lr=0.001, num_epochs=5):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
         self.hidden_dim = 2048
-        self.num_epochs = 2
+        self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.sparsity_target = sparsity_target
         self.sparsity_weight = sparsity_weight
@@ -61,7 +61,7 @@ class Autoencoder(nn.Module):
                 loss = self.criterion(decoded, data.float())
                 sparsity_loss = self.sparsity_penalty(encoded)
                 temporal_loss = 0
-                if prev_encoded is not None:
+                if layer != 0:
                     temporal_loss = self.temporal_penalty(prev_encoded, encoded)
                 total_loss = loss + min(self.sparsity_weight * sparsity_loss, loss) + min(self.temporal_weight * temporal_loss, loss)
                 print(f'layer {layer} loss {loss.item()} sparsity {sparsity_loss.item() * self.sparsity_weight} temporal {temporal_loss * self.temporal_weight} total {total_loss.item()}')
