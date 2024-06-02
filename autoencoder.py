@@ -8,7 +8,7 @@ class Autoencoder(nn.Module):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = 2048
+        self.hidden_dim = 8192
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.sparsity_target = sparsity_target
@@ -63,7 +63,7 @@ class Autoencoder(nn.Module):
                 temporal_loss = 0
                 if layer != 0:
                     temporal_loss = self.temporal_penalty(prev_encoded, encoded)
-                total_loss = loss + min(self.sparsity_weight * sparsity_loss, loss) + min(self.temporal_weight * temporal_loss, loss)
+                total_loss = loss + min(self.temporal_weight * temporal_loss, loss)
                 print(f'layer {layer} loss {loss.item()} sparsity {sparsity_loss.item() * self.sparsity_weight} temporal {temporal_loss * self.temporal_weight} total {total_loss.item()}')
                 total_loss.backward(retain_graph=True)
                 optimizer.step()

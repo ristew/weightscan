@@ -93,7 +93,13 @@
             }
           }
         }
-        // objects.push(points);
+
+        const calculateDistance = (p1, p2) => {
+          return Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2);
+        };
+
+        const maxCenterDist = Math.max(...frame.map(p => calculateDistance(p, center)));
+
         for (const pointIdx in frame) {
           for (const neighborPair of neighbors[pointIdx]) {
             const neighborIdx = neighborPair[0];
@@ -104,9 +110,11 @@
               new THREE.Vector3(...frame[pointIdx]),
               new THREE.Vector3(...neighborPoint)
             ]);
-            // const distrat = 1.0 - Math.min(0.5 * di.distance / Math.sqrt(averageDist), 1);
 
-            const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color: new THREE.Color(neighborWeight, 0.0, 0.2 - 0.2 * neighborWeight) }));
+            const centerDist = calculateDistance(frame[pointIdx], center);
+            const centerWeight = Math.pow(1 - (centerDist / maxCenterDist), 2);
+            const color = new THREE.Color(neighborWeight, centerWeight * 0.5, 0.2 - 0.2 * neighborWeight);
+            const line = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color }));
             objects.push(line);
           }
         }

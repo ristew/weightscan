@@ -61,11 +61,9 @@ class Scan():
         self.autoencoder = Autoencoder(
             input_dim=self.normed_states[0][0][0].size()[0],
             compressed_dim=(1024, 3),
-            sparsity_target=0.01,
-            sparsity_weight=0.01,
             temporal_weight=1e5,
-            lr=0.005,
-            num_epochs=4,
+            lr=0.002,
+            num_epochs=15,
         )
         self.autoencoder.train(self.normed_states)
 
@@ -165,4 +163,4 @@ class Scan():
         self.plot()
 
 if __name__ == '__main__':
-    Scan('''<|user|>\nParis is to France as Berlin is to:<|end|>\n<|assistant|>Answer:''').test()
+    Scan('''<|user|>\nComplete the analogy: Paris is to France as Berlin is to:<|end|>\n<|assistant|>Answer:''').test()
