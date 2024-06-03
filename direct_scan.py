@@ -63,7 +63,7 @@ class Scan():
             compressed_dim=(1024, 3),
             temporal_weight=1e5,
             lr=0.002,
-            num_epochs=15,
+            num_epochs=8,
         )
         self.autoencoder.train(self.normed_states)
 
