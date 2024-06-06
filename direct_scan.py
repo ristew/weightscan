@@ -17,8 +17,12 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 from PIL import Image
 
+class Sample():
+    def __init__(self):
+        pass
+
 class Scan():
-    def __init__(self, prompt):
+    def __init__(self, prompts):
         torch.set_default_device('cuda')
         torch.set_float32_matmul_precision('medium')
         self.model_name = 'microsoft/Phi-3-mini-4k-instruct'
@@ -26,10 +30,9 @@ class Scan():
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 5
-        self.prompt = prompt
+        self.prompts = prompts
+        self.states = []
 
-    def gemma(self):
-        return self.model_name == 'google/gemma-2b'
     def norm(self, state):
         if self.model_name == 'microsoft/phi-2':
             return self.model.model.final_layernorm(state)
@@ -37,14 +40,21 @@ class Scan():
             return self.model.model.norm(state)
 
     def forward(self):
-        enc = self.tokenizer(self.prompt, return_tensors='pt', return_attention_mask=False)
-        input_ids = enc['input_ids'].to('cuda')
-        output = self.model.forward(input_ids, output_hidden_states=True)
-        self.get_normed_states(output)
-        # toks = self.normed_states[0]
-        # chunks = torch.chunk(toks, toks.size(1), dim=1)
-        # for c in chunks:
-        #     print('normed', nt.shape, self.top_tokens(c))
+        for prompt in self.prompts:
+            enc = self.tokenizer(prompt, return_tensors='pt', return_attention_mask=False)
+            input_ids = enc['input_ids'].to('cuda')
+            output = self.model.forward(input_ids, output_hidden_states=True)
+            states = self.get_normed_states(output)
+            self.states.append(states)
+
+        self.autoencoder = Autoencoder(
+            input_dim=self.states[0][0][0][0].size()[0],
+            compressed_dim=(2048, 3),
+            temporal_weight=5e3,
+            lr=0.0003,
+            num_epochs=3,
+            training_set=self.states
+        )
         self.embeddings = self.autoencode()
 
     def get_normed_states(self, output):
@@ -54,20 +64,12 @@ class Scan():
         # output layer is already normed
         final = hidden_states[-1]
         normed_states.append(final)
-        self.normed_states = normed_states
         return normed_states
 
     def autoencode(self):
-        self.autoencoder = Autoencoder(
-            input_dim=self.normed_states[0][0][0].size()[0],
-            compressed_dim=(1024, 3),
-            temporal_weight=1e5,
-            lr=0.002,
-            num_epochs=8,
-        )
-        self.autoencoder.train(self.normed_states)
+        self.autoencoder.train()
 
-        res = [self.autoencoder(n.float())[0][0] for n in self.normed_states]
+        res = [self.autoencoder(n.float())[0][0] for n in self.states[0]]
         return res
 
     def logits(self, state):
@@ -93,14 +95,14 @@ class Scan():
 
     def visualize(self):
         points = [(p * 16).tolist() for p in self.embeddings]
-        tops = [self.top_tokens(self.normed_states[i]) for i in range(len(self.embeddings))]
+        tops = [self.top_tokens(self.states[0][i]) for i in range(len(self.embeddings))]
         nn_indices = self.find_nearest_neighbors(points)
 
         # Prepare data including nearest neighbors
         data = json.dumps({
             'points': points,
             'tops': tops,
-            'prompt': self.prompt,
+            'prompt': self.prompts[0],
             'neighbors': nn_indices
         })
         with open('visualize_template.html', 'r') as template_file:
@@ -126,10 +128,10 @@ class Scan():
         ax.title.set_color('white')
         plt.axis([self.global_x_min, self.global_x_max, self.global_y_min, self.global_y_max])
         plt.title(f"layer {layer_id}")
-        top_probs, top_indices = self.logprobs(self.normed_states[layer_id])
+        top_probs, top_indices = self.logprobs(self.states[0][layer_id])
         top_tokens = [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
         top_info = ", ".join([f"({repr(token)}, {prob:.2f})" for token, prob in top_tokens[:5]])
-        text_str = f"prompt: {repr(self.prompt)}\ntop_k({self.top_k}): {top_info}"
+        text_str = f"prompt: {repr(self.prompts[0])}\ntop_k({self.top_k}): {top_info}"
         plt.text(self.global_x_min + 1, self.global_y_min + 1, text_str,
                     verticalalignment='bottom', horizontalalignment='left',
                     color='white', fontsize=10)
@@ -160,7 +162,11 @@ class Scan():
     def test(self):
         self.forward()
         self.visualize()
-        self.plot()
+        # self.plot()
 
 if __name__ == '__main__':
-    Scan('''<|user|>\nComplete the analogy: Paris is to France as Berlin is to:<|end|>\n<|assistant|>Answer:''').test()
+    Scan([
+        '''<|user|>\nComplete the analogy: Paris is to France as Berlin is to:<|end|>\n<|assistant|>Paris is to France as Berlin is to''',
+        '''<|user|>\nCalculate: What is 54 * 20?<|end|>\n<|assistant|>54 * 20 =''',
+        '''<|user|>\nWhich came before: the steam engine, or America?<|end|>\n<|assistant|>''',
+    ]).test()

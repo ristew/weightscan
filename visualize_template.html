@@ -66,7 +66,7 @@
       controls.update();
       let currentFrameIndex = 0;
       let lastSwitchTime = performance.now();
-      const frameDuration = 400; // Frame duration in milliseconds
+      const frameDuration = 300; // Frame duration in milliseconds
       let running = true;
       let step = 0;
 
@@ -75,6 +75,23 @@
       function calculateDistance(p1, p2) {
         return Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2);
       }
+
+      function add(p1, p2) {
+        return [p1[0] + p2[0], p1[1] + p2[1], p1[2] + p2[2]];
+      }
+
+      function sub(p1, p2) {
+        return [p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]];
+      }
+
+      function mulConst(p1, q) {
+        return [p1[0] * q, p1[1] * q, p1[2] * q];
+      }
+
+      function divConst(p1, q) {
+        return [p1[0] / q, p1[1] / q, p1[2] / q];
+      }
+
 
       function neighborLine(frameIdx, pointIdx, neighborPairIdx) {
         const frame = POINTS[frameIdx];
@@ -85,7 +102,15 @@
         const neighborDist = neighborPair[1];
         const neighborWeight = Math.pow(1 - neighborDist / maxDist, 2);
         const point = frame[pointIdx];
-        const neighborPoint = frame[neighborIdx];
+        const neighborPointRaw = frame[neighborIdx];
+
+        const direction = sub(neighborPointRaw, point);
+
+        const magnitude = Math.sqrt(direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2);
+        const unitVector = divConst(direction, magnitude);
+
+        const neighborPoint = add(point, mulConst(unitVector, 0.07));
+
         const centerDist = calculateDistance(point, center);
         const centerWeight = Math.pow(1 - (centerDist / maxCenterDist), 2);
         const color = new THREE.Color(neighborWeight, centerWeight * 0.5, 0.2 - 0.2 * neighborWeight);
@@ -195,7 +220,7 @@
             }
           } else if (currentFrameIndex === 0) {
             running = false;
-            setTimeout(() => { running = true; }, 2000);
+            setTimeout(() => { running = true; }, 1000);
           }
         }
         controls.target.set(...center);
