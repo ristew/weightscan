@@ -5,15 +5,13 @@ import torch.nn.functional as F
 import torch.linalg as LA
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 16), sparsity_target=0.001, sparsity_weight=0.01, temporal_weight=1e6, lr=0.001, num_epochs=5, training_set=None):
+    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, lr=0.001, num_epochs=5, training_set=None):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = 4096
+        self.hidden_dim = 2048
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
-        self.sparsity_target = sparsity_target
-        self.sparsity_weight = sparsity_weight
         self.temporal_weight = temporal_weight
         self.lr = lr
         self.global_pool = nn.AdaptiveAvgPool1d(1)
@@ -34,6 +32,7 @@ class Autoencoder(nn.Module):
         a = torch.relu(a)
         a = self.encoder_output(a)
         encoded = a.view(-1, self.compressed_dim[0], self.compressed_dim[1])
+        encoded = self.filter_densest(encoded, self.compressed_dim[0] // 20)
         encoded = self.normalize(encoded)
         b = self.decoder_input(a)
         b = torch.relu(b)
@@ -48,6 +47,25 @@ class Autoencoder(nn.Module):
         norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
         normalized_encoded = encoded / norm
         return normalized_encoded
+
+    def filter_densest(self, encoded, k=200):
+        # Assuming encoded shape is [batch_size, num_points, features]
+        # Calculate the 'density' (e.g., L2 norm)
+        norms = torch.norm(encoded, p=2, dim=2)  # Calculate L2 norm across the features dimension
+
+        # Use topk to find the indices of the top k densest points
+        topk_values, topk_indices = torch.topk(norms, k, dim=1, largest=True, sorted=False)
+
+        # Create a mask that will zero out all but the top k densest points
+        mask = torch.zeros_like(norms, dtype=torch.bool)
+        batch_indices = torch.arange(encoded.shape[0]).unsqueeze(1).expand(-1, k)
+        mask[batch_indices, topk_indices] = True
+
+        # Zero out all but the top k densest points
+        mask = mask.unsqueeze(-1).expand_as(encoded)
+        filtered_encoded = torch.where(mask, encoded, torch.zeros_like(encoded))
+        return filtered_encoded
+
 
     def temporal_penalty(self, encoded_prev, encoded_next):
         return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight

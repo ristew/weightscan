@@ -25,9 +25,9 @@ class Scan():
     def __init__(self, prompts):
         torch.set_default_device('cuda')
         torch.set_float32_matmul_precision('medium')
-        self.model_name = 'microsoft/Phi-3-mini-4k-instruct'
+        self.model_name = 'openai-community/gpt2'
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, quantization_config=quantization_config, trust_remote_code=True)
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 5
         self.prompts = prompts
@@ -36,6 +36,8 @@ class Scan():
     def norm(self, state):
         if self.model_name == 'microsoft/phi-2':
             return self.model.model.final_layernorm(state)
+        elif self.model_name == 'openai-community/gpt2':
+            return self.model.transformer.ln_f(state)
         else:
             return self.model.model.norm(state)
 
@@ -50,9 +52,9 @@ class Scan():
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(2048, 3),
-            temporal_weight=5e3,
-            lr=0.0003,
-            num_epochs=3,
+            temporal_weight=1e4,
+            lr=5e-4,
+            num_epochs=5,
             training_set=self.states
         )
         self.embeddings = self.autoencode()
@@ -166,7 +168,8 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
-        '''<|user|>\nComplete the analogy: Paris is to France as Berlin is to:<|end|>\n<|assistant|>Paris is to France as Berlin is to''',
-        '''<|user|>\nCalculate: What is 54 * 20?<|end|>\n<|assistant|>54 * 20 =''',
-        '''<|user|>\nWhich came before: the steam engine, or America?<|end|>\n<|assistant|>''',
+        'When I go fishing, I like to think about',
+        '22 * 8 =',
+        'It is going to be okay',
+        'How are you today?',
     ]).test()
