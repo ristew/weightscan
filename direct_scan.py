@@ -47,8 +47,9 @@ class Scan():
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(2048, 3),
             temporal_weight=1e4,
+            distance_weight=1e-1,
             lr=1e-3,
-            num_epochs=5,
+            num_epochs=3,
             training_set=self.states
         ).to(self.device)
         self.embeddings = self.autoencode()

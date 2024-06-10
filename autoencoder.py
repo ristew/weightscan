@@ -3,9 +3,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.linalg as LA
+from sklearn.neighbors import NearestNeighbors
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, lr=0.001, num_epochs=5, training_set=None):
+    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, distance_weight=1, lr=0.001, num_epochs=5, training_set=None):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
@@ -13,6 +14,7 @@ class Autoencoder(nn.Module):
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.temporal_weight = temporal_weight
+        self.distance_weight = distance_weight
         self.lr = lr
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.encoder_input = nn.Linear(input_dim, self.hidden_dim)
@@ -51,6 +53,17 @@ class Autoencoder(nn.Module):
     def temporal_penalty(self, encoded_prev, encoded_next):
         return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight
 
+    def calculate_distance_loss(self, embeddings, k=5, eps=0.01):
+        distances = []
+        for layer in embeddings:
+            layer = layer.detach()
+            neighbors = NearestNeighbors(n_neighbors=k+1, metric='euclidean')
+            neighbors.fit(layer)
+            distances_layer = neighbors.kneighbors(layer)[0][:, 1:]  # Exclude the point itself
+            print('distances', len(distances_layer), distances_layer)
+            distances.append(distances_layer.sum())
+        return sum(distances) * self.distance_weight
+
     def train_sample(self, sample):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         layer = 0
@@ -62,8 +75,9 @@ class Autoencoder(nn.Module):
             temporal_loss = 0
             if layer != 0:
                 temporal_loss = self.temporal_penalty(prev_encoded, encoded)
-            total_loss = loss + temporal_loss
-            print(f'layer {layer} loss {loss.item()} temporal {temporal_loss} total {total_loss.item()}')
+            distance_loss = self.calculate_distance_loss(encoded)
+            total_loss = loss + temporal_loss + distance_loss
+            print(f'layer {layer} loss {loss.item()} temporal {temporal_loss} distance {distance_loss} total {total_loss.item()}')
             total_loss.backward(retain_graph=True)
             optimizer.step()
             prev_encoded = encoded.detach()
