@@ -32,8 +32,8 @@ class Autoencoder(nn.Module):
         a = torch.relu(a)
         a = self.encoder_output(a)
         encoded = a.view(-1, self.compressed_dim[0], self.compressed_dim[1])
-        encoded = self.filter_densest(encoded, self.compressed_dim[0] // 20)
         encoded = self.normalize(encoded)
+        a = encoded.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
         b = self.decoder_input(a)
         b = torch.relu(b)
         a = self.decoder_hidden(b)
@@ -47,25 +47,6 @@ class Autoencoder(nn.Module):
         norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
         normalized_encoded = encoded / norm
         return normalized_encoded
-
-    def filter_densest(self, encoded, k=200):
-        # Assuming encoded shape is [batch_size, num_points, features]
-        # Calculate the 'density' (e.g., L2 norm)
-        norms = torch.norm(encoded, p=2, dim=2)  # Calculate L2 norm across the features dimension
-
-        # Use topk to find the indices of the top k densest points
-        topk_values, topk_indices = torch.topk(norms, k, dim=1, largest=True, sorted=False)
-
-        # Create a mask that will zero out all but the top k densest points
-        mask = torch.zeros_like(norms, dtype=torch.bool)
-        batch_indices = torch.arange(encoded.shape[0]).unsqueeze(1).expand(-1, k)
-        mask[batch_indices, topk_indices] = True
-
-        # Zero out all but the top k densest points
-        mask = mask.unsqueeze(-1).expand_as(encoded)
-        filtered_encoded = torch.where(mask, encoded, torch.zeros_like(encoded))
-        return filtered_encoded
-
 
     def temporal_penalty(self, encoded_prev, encoded_next):
         return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight

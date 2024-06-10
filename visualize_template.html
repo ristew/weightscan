@@ -113,7 +113,7 @@
 
         const centerDist = calculateDistance(point, center);
         const centerWeight = Math.pow(1 - (centerDist / maxCenterDist), 2);
-        const color = new THREE.Color(neighborWeight, centerWeight * 0.5, 0.2 - 0.2 * neighborWeight);
+        const color = new THREE.Color(neighborWeight, centerWeight * 0.3, 0.2 - 0.2 * neighborWeight);
         return {
           color,
           point,
