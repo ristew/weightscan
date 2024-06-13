@@ -6,7 +6,7 @@ import torch.linalg as LA
 from sklearn.neighbors import NearestNeighbors
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, distance_weight=1, lr=0.001, num_epochs=5, training_set=None):
+    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, distance_weight=1, lr=0.001, num_epochs=5, training_set=None, logprob_fn=None):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
@@ -24,6 +24,7 @@ class Autoencoder(nn.Module):
         self.decoder_hidden = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.decoder_output = nn.Linear(self.hidden_dim, input_dim)
         self.training_set = training_set
+        self.logprob_fn = logprob_fn
 
     def forward(self, x):
         x_pooled = self.global_pool(x.transpose(1, 2))
@@ -42,7 +43,7 @@ class Autoencoder(nn.Module):
         b = torch.relu(b)
         b = self.decoder_output(b)
         decoded = b.view(-1, self.input_dim)
-        return encoded, decoded
+        return encoded, decoded, x_pooled
 
     def normalize(self, encoded):
         # Apply L2 normalization
@@ -50,18 +51,21 @@ class Autoencoder(nn.Module):
         normalized_encoded = encoded / norm
         return normalized_encoded
 
-    def temporal_penalty(self, encoded_prev, encoded_next):
-        return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight
+    def temporal_penalty(self, encoded_prev, encoded_next, state):
+        logprobs = self.logprob_fn(state)
+        kl_div = F.kl_div(logprobs, self.logprobs.exp(), reduction='batchmean', log_target=False)
+        inverse_k = 1 / (1 + kl_div)
+        return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight / inverse_k
 
     def calculate_distance_loss(self, embeddings, k=5, eps=0.01):
         distances = []
         for layer in embeddings:
-            layer = layer.detach()
+            layer = layer.detach().cpu()
             neighbors = NearestNeighbors(n_neighbors=k+1, metric='euclidean')
             neighbors.fit(layer)
             distances_layer = neighbors.kneighbors(layer)[0][:, 1:]  # Exclude the point itself
-            print('distances', len(distances_layer), distances_layer)
-            distances.append(distances_layer.sum())
+            # print('distances', len(distances_layer), distances_layer)
+            distances.append(np.sqrt(distances_layer).sum())
         return sum(distances) * self.distance_weight
 
     def train_sample(self, sample):
@@ -70,23 +74,24 @@ class Autoencoder(nn.Module):
         sum_loss = 0
         for data in sample:
             optimizer.zero_grad()
-            encoded, decoded = self(data.float())
-            loss = self.criterion(decoded, data.float())
+            encoded, decoded, pooled = self(data.float())
+            loss = self.criterion(decoded, pooled)
             temporal_loss = 0
             if layer != 0:
-                temporal_loss = self.temporal_penalty(prev_encoded, encoded)
+                temporal_loss = self.temporal_penalty(self.prev_encoded, encoded, data)
+            self.logprobs = self.logprob_fn(data)
             distance_loss = self.calculate_distance_loss(encoded)
             total_loss = loss + temporal_loss + distance_loss
             print(f'layer {layer} loss {loss.item()} temporal {temporal_loss} distance {distance_loss} total {total_loss.item()}')
             total_loss.backward(retain_graph=True)
             optimizer.step()
-            prev_encoded = encoded.detach()
+            self.prev_encoded = encoded.detach()
             layer += 1
             sum_loss += total_loss.item()
         print(f'sum loss: {sum_loss}')
 
     def train(self):
-        prev_encoded = None
+        self.prev_encoded = None
         for epoch in range(self.num_epochs):
             if epoch == self.num_epochs - self.num_epochs // 3:
                 print('lr descend')

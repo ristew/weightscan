@@ -47,10 +47,11 @@ class Scan():
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(2048, 3),
             temporal_weight=1e4,
-            distance_weight=1e-1,
-            lr=1e-3,
+            distance_weight=1e-3,
+            lr=1e-4,
             num_epochs=3,
-            training_set=self.states
+            training_set=self.states,
+            logprob_fn=self.logprobs,
         ).to(self.device)
         self.embeddings = self.autoencode()
 
@@ -72,11 +73,10 @@ class Scan():
 
     def logprobs(self, state):
         logits = self.logits(state)
-        probs = F.softmax(logits[0], dim=-1)
-        return torch.topk(probs[0, -1, :], self.top_k)
+        return F.softmax(logits[0], dim=-1)
 
     def top_tokens(self, state):
-        top_probs, top_indices = self.logprobs(state)
+        top_probs, top_indices = torch.topk(self.logprobs(state)[0, -1, :], self.top_k)
         return [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
 
     def find_nearest_neighbors(self, embeddings, n_neighbors=4):
@@ -112,8 +112,28 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
+        'The sun rises in the east and sets in the',
         'When I go fishing, I like to think about',
         '22 * 8 =',
         'It is going to be okay',
         'How are you today?',
+        'The quick brown fox jumps over the lazy dog',
+        'What is the capital of France?',
+        'I love the smell of coffee in the morning',
+        'The square root of 144 is',
+        'I am feeling a bit under the weather today',
+        'Can you recommend a good book to read?',
+        '42 / 6 =',
+        'I am excited about my upcoming vacation',
+        'What is your favorite color?',
+        'The early bird catches the worm',
+        'How many planets are in our solar system?',
+        'I enjoy listening to classical music',
+        '15 + 27 =',
+        'I am grateful for my family and friends',
+        'What is the weather forecast for tomorrow?',
+        'Honesty is the best policy',
+        '64 - 19 =',
+        'I am learning to play the guitar',
+        'What is the largest continent in the world?'
     ]).test()
