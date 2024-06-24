@@ -4,9 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.linalg as LA
 from sklearn.neighbors import NearestNeighbors
+from grokfast import gradfilter_ema
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, distance_weight=1, lr=0.001, num_epochs=5, training_set=None, logprob_fn=None):
+    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, distance_weight=1, lr=0.001, num_epochs=5, training_set=None, logprob_fn=None, weight_decay=0):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
@@ -16,6 +17,7 @@ class Autoencoder(nn.Module):
         self.temporal_weight = temporal_weight
         self.distance_weight = distance_weight
         self.lr = lr
+        self.weight_decay = weight_decay
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.encoder_input = nn.Linear(input_dim, self.hidden_dim)
         self.encoder_hidden = nn.Linear(self.hidden_dim, self.hidden_dim)
@@ -69,7 +71,7 @@ class Autoencoder(nn.Module):
         return sum(distances) * self.distance_weight
 
     def train_sample(self, sample):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         layer = 0
         sum_loss = 0
         for data in sample:
@@ -84,6 +86,7 @@ class Autoencoder(nn.Module):
             total_loss = loss + temporal_loss + distance_loss
             print(f'layer {layer} loss {loss.item()} temporal {temporal_loss} distance {distance_loss} total {total_loss.item()}')
             total_loss.backward(retain_graph=True)
+            self.grads = gradfilter_ema(self, grads=self.grads)
             optimizer.step()
             self.prev_encoded = encoded.detach()
             layer += 1
@@ -96,5 +99,6 @@ class Autoencoder(nn.Module):
             if epoch == self.num_epochs - self.num_epochs // 3:
                 print('lr descend')
                 self.lr = self.lr / 3
+            self.grads = None
             for sample in self.training_set:
                 self.train_sample(sample)

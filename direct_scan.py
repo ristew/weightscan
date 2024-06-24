@@ -48,8 +48,9 @@ class Scan():
             compressed_dim=(2048, 3),
             temporal_weight=1e4,
             distance_weight=1e-3,
-            lr=1e-4,
-            num_epochs=3,
+            lr=3e-4,
+            weight_decay=0.001,
+            num_epochs=9,
             training_set=self.states,
             logprob_fn=self.logprobs,
         ).to(self.device)
