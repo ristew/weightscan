@@ -50,7 +50,7 @@ class Scan():
             distance_weight=1e-3,
             lr=3e-4,
             weight_decay=0.001,
-            num_epochs=9,
+            num_epochs=3,
             training_set=self.states,
             logprob_fn=self.logprobs,
         ).to(self.device)

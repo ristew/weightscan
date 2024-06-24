@@ -18,7 +18,7 @@ class Autoencoder(nn.Module):
         self.distance_weight = distance_weight
         self.lr = lr
         self.weight_decay = weight_decay
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
+        self.global_pool = nn.AdaptiveAvgPool2d((1, self.compressed_dim[1]))
         self.encoder_input = nn.Linear(input_dim, self.hidden_dim)
         self.encoder_hidden = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.encoder_output = nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1])
@@ -29,46 +29,35 @@ class Autoencoder(nn.Module):
         self.logprob_fn = logprob_fn
 
     def forward(self, x):
-        x_pooled = self.global_pool(x.transpose(1, 2))
-        x_pooled = x_pooled.squeeze(-1)
-        a = self.encoder_input(x_pooled)
+        # x shape: (batch_size, seq_len, input_dim)
+        batch_size, seq_len, _ = x.shape
+
+        # Encode
+        a = self.encoder_input(x)
         a = torch.relu(a)
         a = self.encoder_hidden(a)
         a = torch.relu(a)
         a = self.encoder_output(a)
-        encoded = a.view(-1, self.compressed_dim[0], self.compressed_dim[1])
+        encoded = a.view(batch_size, seq_len, self.compressed_dim[0], self.compressed_dim[1])
         encoded = self.normalize(encoded)
-        a = encoded.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
+        pooled_encoded = self.global_pool(encoded.transpose(1, 2)).squeeze(2)
+
+        # Decode
+        a = pooled_encoded.view(batch_size, seq_len, -1)
         b = self.decoder_input(a)
         b = torch.relu(b)
-        a = self.decoder_hidden(b)
+        b = self.decoder_hidden(b)
         b = torch.relu(b)
-        b = self.decoder_output(b)
-        decoded = b.view(-1, self.input_dim)
-        return encoded, decoded, x_pooled
+        decoded = self.decoder_output(b)
+
+        return encoded, decoded, x
 
     def normalize(self, encoded):
-        # Apply L2 normalization
-        norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
-        normalized_encoded = encoded / norm
-        return normalized_encoded
+        # Apply L2 normalization along the last dimension
+        norm = torch.norm(encoded, p=2, dim=-1, keepdim=True)
+        return encoded / (norm + 1e-7)
 
-    def temporal_penalty(self, encoded_prev, encoded_next, state):
-        logprobs = self.logprob_fn(state)
-        kl_div = F.kl_div(logprobs, self.logprobs.exp(), reduction='batchmean', log_target=False)
-        inverse_k = 1 / (1 + kl_div)
-        return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight / inverse_k
-
-    def calculate_distance_loss(self, embeddings, k=5, eps=0.01):
-        distances = []
-        for layer in embeddings:
-            layer = layer.detach().cpu()
-            neighbors = NearestNeighbors(n_neighbors=k+1, metric='euclidean')
-            neighbors.fit(layer)
-            distances_layer = neighbors.kneighbors(layer)[0][:, 1:]  # Exclude the point itself
-            # print('distances', len(distances_layer), distances_layer)
-            distances.append(np.sqrt(distances_layer).sum())
-        return sum(distances) * self.distance_weight
+    # ... (other methods remain the same)
 
     def train_sample(self, sample):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -76,22 +65,42 @@ class Autoencoder(nn.Module):
         sum_loss = 0
         for data in sample:
             optimizer.zero_grad()
-            encoded, decoded, pooled = self(data.float())
-            loss = self.criterion(decoded, pooled)
+            encoded, decoded, original = self(data.float())
+            loss = self.criterion(decoded, original)
             temporal_loss = 0
-            if layer != 0:
+            if layer != 0 and encoded.size(1) == self.prev_encoded.size(1):
                 temporal_loss = self.temporal_penalty(self.prev_encoded, encoded, data)
-            self.logprobs = self.logprob_fn(data)
+
+            # Distance loss (adjust for variable sequence length)
             distance_loss = self.calculate_distance_loss(encoded)
+
             total_loss = loss + temporal_loss + distance_loss
-            print(f'layer {layer} loss {loss.item()} temporal {temporal_loss} distance {distance_loss} total {total_loss.item()}')
+            print(f'layer {layer} loss {loss.item():.2g} temporal {temporal_loss:.2g} distance {distance_loss:.2g} total {total_loss.item():.2g}')
             total_loss.backward(retain_graph=True)
             self.grads = gradfilter_ema(self, grads=self.grads)
             optimizer.step()
             self.prev_encoded = encoded.detach()
+            self.logprobs = self.logprob_fn(data)
             layer += 1
             sum_loss += total_loss.item()
         print(f'sum loss: {sum_loss}')
+
+    def calculate_distance_loss(self, embeddings, k=5, eps=0.01):
+        distances = []
+        for layer in embeddings:
+            layer = layer.detach().cpu().view(-1, self.compressed_dim[0] * self.compressed_dim[1])
+            neighbors = NearestNeighbors(n_neighbors=min(k+1, layer.size(0)), metric='euclidean')
+            neighbors.fit(layer)
+            distances_layer = neighbors.kneighbors(layer)[0][:, 1:]  # Exclude the point itself
+            distances.append(np.sqrt(distances_layer).sum())
+        return sum(distances) * self.distance_weight
+
+    def temporal_penalty(self, encoded_prev, encoded_next, state):
+        logprobs = self.logprob_fn(state)
+        kl_div = F.kl_div(logprobs, self.logprobs.exp(), reduction='batchmean', log_target=False)
+        inverse_k = 1 / (1 + kl_div)
+        return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight / inverse_k
+
 
     def train(self):
         self.prev_encoded = None
