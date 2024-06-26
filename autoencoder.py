@@ -55,9 +55,11 @@ class Autoencoder(nn.Module):
 
     def temporal_penalty(self, encoded_prev, encoded_next, state):
         logprobs = self.logprob_fn(state)
-        kl_div = F.kl_div(logprobs, self.logprobs.exp(), reduction='batchmean', log_target=False)
-        inverse_k = 1 / (1 + kl_div)
-        return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight / inverse_k
+        kl_div = F.kl_div(logprobs, self.prev_logprobs.exp(), reduction='batchmean', log_target=False)
+        logprob_distance = torch.norm(logprobs - self.prev_logprobs)
+        state_change = torch.norm(state - self.prev_state)
+        print('ld', logprob_distance, 'sc', state_change)
+        return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight / logprob_distance**2
 
     def calculate_distance_loss(self, embeddings, k=5, eps=0.01):
         distances = []
@@ -81,7 +83,8 @@ class Autoencoder(nn.Module):
             temporal_loss = 0
             if layer != 0:
                 temporal_loss = self.temporal_penalty(self.prev_encoded, encoded, data)
-            self.logprobs = self.logprob_fn(data)
+            self.prev_logprobs = self.logprob_fn(data)
+            self.prev_state = data
             distance_loss = self.calculate_distance_loss(encoded)
             total_loss = loss + temporal_loss + distance_loss
             print(f'layer {layer} loss {loss.item()} temporal {temporal_loss} distance {distance_loss} total {total_loss.item()}')
@@ -93,7 +96,7 @@ class Autoencoder(nn.Module):
             sum_loss += total_loss.item()
         print(f'sum loss: {sum_loss}')
 
-    def train(self):
+    def train_set(self):
         self.prev_encoded = None
         for epoch in range(self.num_epochs):
             if epoch == self.num_epochs - self.num_epochs // 3:

@@ -45,12 +45,12 @@ class Scan():
 
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
-            compressed_dim=(2048, 3),
-            temporal_weight=1e4,
+            compressed_dim=(4096, 3),
+            temporal_weight=1e7,
             distance_weight=1e-3,
             lr=3e-4,
             weight_decay=0.001,
-            num_epochs=9,
+            num_epochs=6,
             training_set=self.states,
             logprob_fn=self.logprobs,
         ).to(self.device)
@@ -65,7 +65,7 @@ class Scan():
         return normed_states
 
     def autoencode(self):
-        self.autoencoder.train()
+        self.autoencoder.train_set()
         res = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[0]]
         return res
 
@@ -114,27 +114,7 @@ class Scan():
 if __name__ == '__main__':
     Scan([
         'The sun rises in the east and sets in the',
-        'When I go fishing, I like to think about',
-        '22 * 8 =',
-        'It is going to be okay',
-        'How are you today?',
-        'The quick brown fox jumps over the lazy dog',
-        'What is the capital of France?',
-        'I love the smell of coffee in the morning',
-        'The square root of 144 is',
-        'I am feeling a bit under the weather today',
-        'Can you recommend a good book to read?',
-        '42 / 6 =',
-        'I am excited about my upcoming vacation',
-        'What is your favorite color?',
-        'The early bird catches the worm',
-        'How many planets are in our solar system?',
-        'I enjoy listening to classical music',
-        '15 + 27 =',
-        'I am grateful for my family and friends',
-        'What is the weather forecast for tomorrow?',
-        'Honesty is the best policy',
-        '64 - 19 =',
-        'I am learning to play the guitar',
-        'What is the largest continent in the world?'
+        'North, south, east, and west',
+        'South to north, west to east',
+        'From the northwest to the southeast',
     ]).test()
