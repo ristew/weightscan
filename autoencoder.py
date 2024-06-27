@@ -52,25 +52,23 @@ class Autoencoder(nn.Module):
         norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
         normalized_encoded = encoded / norm
         return normalized_encoded
-
     def temporal_penalty(self, encoded_prev, encoded_next, state):
-        logprobs = self.logprob_fn(state)
-        kl_div = F.kl_div(logprobs, self.prev_logprobs.exp(), reduction='batchmean', log_target=False)
-        logprob_distance = torch.norm(logprobs - self.prev_logprobs)
-        state_change = torch.norm(state - self.prev_state)
-        print('ld', logprob_distance, 'sc', state_change)
-        return F.mse_loss(encoded_prev, encoded_next) * self.temporal_weight / logprob_distance**2
+        # Normalize vectors
+        encoded_prev_norm = F.normalize(encoded_prev, p=2, dim=-1)
+        encoded_next_norm = F.normalize(encoded_next, p=2, dim=-1)
+        state_norm = F.normalize(state, p=2, dim=-1)
+        prev_state_norm = F.normalize(self.prev_state, p=2, dim=-1)
 
-    def calculate_distance_loss(self, embeddings, k=5, eps=0.01):
-        distances = []
-        for layer in embeddings:
-            layer = layer.detach().cpu()
-            neighbors = NearestNeighbors(n_neighbors=k+1, metric='euclidean')
-            neighbors.fit(layer)
-            distances_layer = neighbors.kneighbors(layer)[0][:, 1:]  # Exclude the point itself
-            # print('distances', len(distances_layer), distances_layer)
-            distances.append(np.sqrt(distances_layer).sum())
-        return sum(distances) * self.distance_weight
+        # Calculate losses using normalized vectors
+        encoded_loss = F.mse_loss(encoded_prev_norm, encoded_next_norm)
+        state_loss = F.mse_loss(prev_state_norm, state_norm)
+
+        # Calculate the difference
+        loss_diff = encoded_loss - state_loss
+
+        print(f'el {encoded_loss.item():.3g}\tsl {state_loss.item():.3g}\tdiff {loss_diff.item():.3g}')
+
+        return self.temporal_weight * loss_diff**2
 
     def train_sample(self, sample):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -85,9 +83,8 @@ class Autoencoder(nn.Module):
                 temporal_loss = self.temporal_penalty(self.prev_encoded, encoded, data)
             self.prev_logprobs = self.logprob_fn(data)
             self.prev_state = data
-            distance_loss = self.calculate_distance_loss(encoded)
-            total_loss = loss + temporal_loss + distance_loss
-            print(f'layer {layer} loss {loss.item()} temporal {temporal_loss} distance {distance_loss} total {total_loss.item()}')
+            total_loss = loss + temporal_loss
+            print(f'l{layer}\tloss {loss.item():.3g}\ttemporal {temporal_loss:.3g}\ttotal {total_loss.item():.3g}')
             total_loss.backward(retain_graph=True)
             self.grads = gradfilter_ema(self, grads=self.grads)
             optimizer.step()
@@ -99,6 +96,7 @@ class Autoencoder(nn.Module):
     def train_set(self):
         self.prev_encoded = None
         for epoch in range(self.num_epochs):
+            self.epoch = epoch
             if epoch == self.num_epochs - self.num_epochs // 3:
                 print('lr descend')
                 self.lr = self.lr / 3
