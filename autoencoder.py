@@ -60,13 +60,11 @@ class Autoencoder(nn.Module):
         prev_state_norm = F.normalize(self.prev_state, p=2, dim=-1)
 
         # Calculate losses using normalized vectors
-        encoded_loss = F.mse_loss(encoded_prev_norm, encoded_next_norm)
+        encoded_loss = F.mse_loss(encoded_prev_norm, encoded_next_norm)**2
         state_loss = F.mse_loss(prev_state_norm, state_norm)
 
         # Calculate the difference
         loss_diff = encoded_loss - state_loss
-
-        print(f'el {encoded_loss.item():.3g}\tsl {state_loss.item():.3g}\tdiff {loss_diff.item():.3g}')
 
         return self.temporal_weight * loss_diff.abs()
 

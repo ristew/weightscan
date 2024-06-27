@@ -47,7 +47,7 @@ class Scan():
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(4096, 3),
             temporal_weight=1e4,
-            lr=4e-5,
+            lr=2e-5,
             weight_decay=0.01,
             num_epochs=4,
             training_set=self.states,
