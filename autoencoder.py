@@ -11,7 +11,7 @@ class Autoencoder(nn.Module):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = 2048
+        self.hidden_dim = 4096
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.temporal_weight = temporal_weight
@@ -68,7 +68,7 @@ class Autoencoder(nn.Module):
 
         print(f'el {encoded_loss.item():.3g}\tsl {state_loss.item():.3g}\tdiff {loss_diff.item():.3g}')
 
-        return self.temporal_weight * loss_diff**2
+        return self.temporal_weight * loss_diff.abs()
 
     def train_sample(self, sample):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)

@@ -46,10 +46,10 @@ class Scan():
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(4096, 3),
-            temporal_weight=1e7,
-            lr=1e-4,
-            weight_decay=0.001,
-            num_epochs=6,
+            temporal_weight=1e4,
+            lr=4e-5,
+            weight_decay=0.01,
+            num_epochs=4,
             training_set=self.states,
             logprob_fn=self.logprobs,
         ).to(self.device)
@@ -112,6 +112,7 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
+        'North and',
         'The sun rises in the east and sets in the',
         'North, south, east, and west',
         'South to north, west to east',
