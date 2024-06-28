@@ -45,28 +45,40 @@ class Scan():
 
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
-            compressed_dim=(4096, 3),
-            temporal_weight=1e4,
-            lr=2e-5,
-            weight_decay=0.01,
-            num_epochs=4,
-            training_set=self.states,
-            logprob_fn=self.logprobs,
+            compressed_dim=(128, 3),
+            lr=4e-5,
+            weight_decay=0.001,
+            num_epochs=3,
+            layer_weight=1e1,
         ).to(self.device)
+
+        self.optimizer = torch.optim.Adam(self.autoencoder.parameters(), lr=self.autoencoder.lr, weight_decay=self.autoencoder.weight_decay)
+
+        self.train_autoencoder()
         self.embeddings = self.autoencode()
 
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
-        print('hidden state shape', hidden_states[0][0].shape)
         normed_states = [self.norm(hs) for hs in hidden_states[:-1]]
         final = hidden_states[-1]
         normed_states.append(final)
         return normed_states
 
+    def train_autoencoder(self):
+        for epoch in range(self.autoencoder.num_epochs):
+            for sample in self.states:
+                for layer in sample:
+                    encoded, loss = self.autoencoder.train_layer(layer, self.optimizer)
+                    print(f'Epoch {epoch}, Layer Loss: {loss.item():6.3g}')
+
     def autoencode(self):
-        self.autoencoder.train_set()
-        res = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[0]]
-        return res
+        encoded_results = []
+        with torch.no_grad():
+            for layer_states in self.states[0]:  # Iterate over layers in the first state
+                encoded, _ = self.autoencoder(layer_states)
+                encoded_results.append(encoded.squeeze(0))
+
+        return encoded_results
 
     def logits(self, state):
         return self.model.lm_head(state.unsqueeze(0)).float()
@@ -82,14 +94,17 @@ class Scan():
     def find_nearest_neighbors(self, embeddings, n_neighbors=4):
         nn = []
         for layer in embeddings:
-            neighbors = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
-            neighbors.fit(layer)
-            distances, indices = neighbors.kneighbors(layer)
-            nn.append([list(zip(indices[i].tolist(), distances[i].tolist()))[1:] for i in range(len(distances))])
+            nn_layer = []
+            for token in layer:
+                neighbors = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
+                neighbors.fit(token)
+                distances, indices = neighbors.kneighbors(token)
+                nn_layer.append([list(zip(indices[i].tolist(), distances[i].tolist()))[1:] for i in range(len(distances))])
+            nn.append(nn_layer)
         return nn
 
     def visualize(self):
-        points = [(p * 16).tolist() for p in self.embeddings]
+        points = [(p).tolist() for p in self.embeddings]
         tops = [self.top_tokens(self.states[0][i]) for i in range(len(self.embeddings))]
         nn_indices = self.find_nearest_neighbors(points)
 
@@ -112,7 +127,6 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
-        'North and',
         'The sun rises in the east and sets in the',
         'North, south, east, and west',
         'South to north, west to east',

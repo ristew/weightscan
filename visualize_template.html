@@ -51,22 +51,25 @@
       const controls = new OrbitControls(camera, renderer.domElement);
       camera.position.set(-10, -10, -10);
       camera.lookAt(new THREE.Vector3(0, 0, 0));
-      function calculateCenter(frame) {
-        const sum = frame.reduce((acc, val) => {
-          acc[0] += val[0];
-          acc[1] += val[1];
-          acc[2] += val[2];
+      function calculateCenter(layer) {
+        const sum = layer.reduce((acc, token) => {
+          token.forEach(val => {
+            acc[0] += val[0];
+            acc[1] += val[1];
+            acc[2] += val[2];
+          });
           return acc;
         }, [0, 0, 0]);
-        return sum.map(s => s / frame.length);
+        const totalPoints = layer.reduce((sum, token) => sum + token.length, 0);
+        return sum.map(s => s / totalPoints);
       }
       const center = calculateCenter(POINTS[0]);
       console.log('center', center);
       controls.target.set(...center);
       controls.update();
-      let currentFrameIndex = 0;
+      let currentLayerIndex = 0;
       let lastSwitchTime = performance.now();
-      const frameDuration = 100; // Frame duration in milliseconds
+      const frameDuration = 150; // Frame duration in milliseconds
       let running = true;
       let step = 0;
 
@@ -92,28 +95,26 @@
         return [p1[0] / q, p1[1] / q, p1[2] / q];
       }
 
+      // Generate a color based on the token index
+      function getTokenColor(tokenIndex) {
+        const hue = (tokenIndex * 0.618033988749895) % 1; // Golden ratio distribution
+        return new THREE.Color().setHSL(hue, 0.5, 0.5);
+      }
 
-      function neighborLine(frameIdx, pointIdx, neighborPairIdx) {
-        const frame = POINTS[frameIdx];
-        const neighbors = NEIGHBORS[frameIdx];
-        const { maxDist, maxCenterDist } = META[frameIdx];
+      function neighborLine(layerIdx, tokenIdx, pointIdx, neighborPairIdx) {
+        const layer = POINTS[layerIdx];
+        const neighbors = NEIGHBORS[layerIdx][tokenIdx];
         const neighborPair = neighbors[pointIdx][neighborPairIdx];
         const neighborIdx = neighborPair[0];
-        const neighborDist = neighborPair[1];
-        const neighborWeight = Math.pow(1 - neighborDist / maxDist, 2);
-        const point = frame[pointIdx];
-        const neighborPointRaw = frame[neighborIdx];
+        const point = layer[tokenIdx][pointIdx];
+        const neighborPointRaw = layer[tokenIdx][neighborIdx];
 
         const direction = sub(neighborPointRaw, point);
-
         const magnitude = Math.sqrt(direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2);
         const unitVector = divConst(direction, magnitude);
-
         const neighborPoint = add(point, mulConst(unitVector, 0.07));
 
-        const centerDist = calculateDistance(point, center);
-        const centerWeight = Math.pow(1 - (centerDist / maxCenterDist), 2);
-        const color = new THREE.Color(neighborWeight, centerWeight * 0.3, 0.2 - 0.2 * neighborWeight);
+        const color = getTokenColor(tokenIdx);
         return {
           color,
           point,
@@ -123,14 +124,14 @@
       const EDGES = {};
       const LINES = [];
 
-      function frameObjects(frameIdx) {
+      function frameObjects(layerIdx) {
         const objects = [];
-        const frame = POINTS[frameIdx];
-        const neighbors = NEIGHBORS[frameIdx];
-        EDGES[frameIdx] = [];
-        META[frameIdx] = {};
+        const layer = POINTS[layerIdx];
+        const layerNeighbors = NEIGHBORS[layerIdx];
+        EDGES[layerIdx] = [];
+        META[layerIdx] = {};
         const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(frame.flat());
+        const positions = new Float32Array(layer.flat(2));
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         const material = new THREE.PointsMaterial({
           color: 0xDDDDDD,
@@ -140,31 +141,20 @@
           opacity: 0.8
         });
         const points = new THREE.Points(geometry, material);
-        let maxDist = 0;
-        for (const point of neighbors) { // just use second layer
-          for (const neighborPair of point) {
-            if (neighborPair[1] > maxDist) {
-              maxDist = neighborPair[1];
-            }
-          }
-        }
-        META[frameIdx].maxDist = maxDist;
-
-
-        const maxCenterDist = Math.max(...frame.map(p => calculateDistance(p, center)));
-        META[frameIdx].maxCenterDist = maxCenterDist;
 
         let lineIdx = 0;
-        for (const pointIdx in frame) {
-          for (const neighborPairIdx in neighbors[pointIdx]) {
-            const { color, point, neighborPoint } = neighborLine(frameIdx, pointIdx, neighborPairIdx);
-            const edge = {
-              lineIdx,
-              pointIdx,
-              neighborPairIdx,
-            };
-            EDGES[frameIdx].push(edge);
-            lineIdx++;
+        for (const tokenIdx in layer) {
+          for (const pointIdx in layer[tokenIdx]) {
+            for (const neighborPairIdx in layerNeighbors[tokenIdx][pointIdx]) {
+              const edge = {
+                lineIdx,
+                tokenIdx,
+                pointIdx,
+                neighborPairIdx,
+              };
+              EDGES[layerIdx].push(edge);
+              lineIdx++;
+            }
           }
         }
         return objects;
@@ -173,23 +163,23 @@
         layers.push(frameObjects(idx));
       }
 
-      for (const pointIdx in POINTS[0]) {
-        for (const neighborPairIdx in NEIGHBORS[0][pointIdx]) {
-          const { color, point, neighborPoint } = neighborLine(0, pointIdx, neighborPairIdx);
-          const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(...point),
-            new THREE.Vector3(...neighborPoint)
-          ]);
+      for (const tokenIdx in POINTS[0]) {
+        for (const pointIdx in POINTS[0][tokenIdx]) {
+          for (const neighborPairIdx in NEIGHBORS[0][tokenIdx][pointIdx]) {
+            const { color, point, neighborPoint } = neighborLine(0, tokenIdx, pointIdx, neighborPairIdx);
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(...point),
+              new THREE.Vector3(...neighborPoint)
+            ]);
 
-          const material = new THREE.LineBasicMaterial({ color });
-          const line = new THREE.Line(lineGeometry, material);
-          LINES.push({ line, material });
-          scene.add(line);
+            const material = new THREE.LineBasicMaterial({ color });
+            const line = new THREE.Line(lineGeometry, material);
+            LINES.push({ line, material });
+            scene.add(line);
+          }
         }
       }
 
-
-      // Modify animate function to include logic for adding lines
       function animate() {
         requestAnimationFrame(animate);
 
@@ -197,9 +187,8 @@
         if (running && now - lastSwitchTime > frameDuration) {
           lastSwitchTime = now;
 
-          for (const edge of EDGES[currentFrameIndex]) {
-            const { color, point, neighborPoint } = neighborLine(currentFrameIndex, edge.pointIdx, edge.neighborPairIdx);
-            // console.log('update edge', edge, color, point, neighborPoint);
+          for (const edge of EDGES[currentLayerIndex]) {
+            const { color, point, neighborPoint } = neighborLine(currentLayerIndex, edge.tokenIdx, edge.pointIdx, edge.neighborPairIdx);
             const { line, material } = LINES[edge.lineIdx];
             line.geometry.attributes.position.setXYZ(0, ...point);
             line.geometry.attributes.position.setXYZ(1, ...neighborPoint);
@@ -207,20 +196,21 @@
             material.color.set(color);
           }
 
-          document.getElementById('frame-info').textContent = `frame ${currentFrameIndex}`;
-          document.getElementById('tops-info').textContent = TOPS[currentFrameIndex].map(top => {
+          document.getElementById('frame-info').textContent = `layer ${currentLayerIndex}`;
+          document.getElementById('tops-info').textContent = TOPS[currentLayerIndex].map(top => {
             return `'${top[0]}' = ${top[1].toFixed(3)}\n`;
           });
 
-          currentFrameIndex = (currentFrameIndex + 1) % POINTS.length;
+          currentLayerIndex = (currentLayerIndex + 1) % POINTS.length;
+
           if (step > 0) {
             step = step - 1;
             if (step <= 0) {
               running = false;
             }
-          } else if (currentFrameIndex === 0) {
+          } else if (currentLayerIndex === 0) {
             running = false;
-            setTimeout(() => { running = true; }, 100);
+            setTimeout(() => { running = true; }, frameDuration * 4);
           }
         }
         controls.target.set(...center);
@@ -233,9 +223,9 @@
           running = !running;
         }
         if (e.key === '[') {
-          currentFrameIndex = currentFrameIndex - 2;
-          if (currentFrameIndex < 0) {
-            currentFrameIndex = POINTS.length + currentFrameIndex;
+          currentLayerIndex = currentLayerIndex - 2;
+          if (currentLayerIndex < 0) {
+            currentLayerIndex = POINTS.length + currentLayerIndex;
           }
           step = 1;
           running = true;
