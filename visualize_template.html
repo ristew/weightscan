@@ -63,10 +63,11 @@
       const center = calculateCenter(POINTS[0]);
       console.log('center', center);
       controls.target.set(...center);
+      controls.autoRotate = true;
       controls.update();
       let currentFrameIndex = 0;
       let lastSwitchTime = performance.now();
-      const frameDuration = 150; // Frame duration in milliseconds
+      const frameDuration = 180;
       let running = true;
       let step = 0;
 

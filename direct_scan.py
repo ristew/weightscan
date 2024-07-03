@@ -39,17 +39,22 @@ class Scan():
         for prompt in self.prompts:
             enc = self.tokenizer(prompt, return_tensors='pt', return_attention_mask=False)
             input_ids = enc['input_ids'].to(self.device)
-            output = self.model.forward(input_ids, output_hidden_states=True)
-            states = self.get_normed_states(output)
-            self.states.append(states)
+            print(len(input_ids), input_ids.shape[1])
+            tok_len = input_ids.shape[1]
+            for i in [tok_len // 3, tok_len // 2, tok_len]:
+                toks = input_ids[:i]
+                output = self.model.forward(toks, output_hidden_states=True)
+                states = self.get_normed_states(output)
+                self.states.append(states)
+                del output
 
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
-            compressed_dim=(4096, 3),
-            temporal_weight=4e3,
-            lr=2e-5,
+            compressed_dim=(2048, 3),
+            temporal_weight=4e2,
+            lr=4e-4,
             weight_decay=0.001,
-            num_epochs=2,
+            num_epochs=6,
             training_set=self.states,
             logprob_fn=self.logprobs,
         ).to(self.device)
@@ -112,7 +117,7 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
-        'After traveling north, we turned left. Several hours later, we turned left again. Then one more time. We were now traveling',
+        'After traveling north, we turned left. Several hours later, we turned left again. We were now traveling',
         'North and south, the eternal poles that guide our navigation. These cardinal directions have shaped human exploration and settlement patterns for millennia. From the frozen tundras of the Arctic to the vast savannas of Africa, the north-south axis has defined climates, cultures, and migratory routes. In many mythologies, the north is associated with mystery and magic, while the south often represents warmth and',
         'The sun rises in the east and sets in the west, a daily cosmic dance that has captivated humanity since time immemorial. This celestial journey marks the passage of time and the rhythm of life on Earth. Ancient civilizations built monuments and aligned cities to track this east-west movement, creating calendars and predicting seasons. The east, associated with new beginnings, contrasts with the west, often symbolizing endings and reflection.',
         'North, south, east, and west form the foundation of our spatial understanding. These four cardinal directions enable us to create maps, navigate vast oceans, and explore unknown territories. They\'re deeply ingrained in human culture, appearing in everything from ancient spiritual practices to modern GPS systems. Each direction carries its own symbolism and significance across different societies, influencing architecture, agriculture, and even burial practices.',
@@ -129,13 +134,5 @@ if __name__ == '__main__':
         'Easterly breeze off the ocean brings moisture and moderates coastal climates. This wind pattern plays a crucial role in weather systems, influencing precipitation, temperature, and air quality in coastal regions. In many cultures, the east is associated with new beginnings, enlightenment, and spiritual awakening, partly due to its connection with the rising sun. Easterly winds have been important in navigation, particularly during the age of sail, enabling trade routes and explorations that shaped global history.',
         'Southwest desert meets northwest forest, creating a dramatic ecological transition zone. This contrast showcases the diversity of landscapes and ecosystems within a single region or country. The southwest, often characterized by arid climates and unique adaptations of flora and fauna, contrasts sharply with the lush, temperate forests of the northwest. These geographical differences have shaped human settlements, economic activities, and cultural practices, leading to diverse regional identities within larger national frameworks.',
         'From sea to shining sea, east to west, this phrase often evokes images of vast continental expanses and national unity. It\'s particularly associated with the United States, spanning from the Atlantic to the Pacific. This east-west orientation has shaped nations\' development, from ancient China\'s unification to Russia\'s expansion across Eurasia. It influences climate patterns, time zones, and cultural variations within countries. The journey from east to west is often symbolic of progress, adventure, and the fulfillment of manifest destiny in many national narratives.',
-        'North Star guides travelers at night, a constant celestial beacon that has aided navigation for thousands of years. Also known as Polaris, this star appears stationary in the night sky due to its alignment with Earth\'s rotational axis. Its reliability has made it a powerful symbol in many cultures, representing constancy, guidance, and hope. In the northern hemisphere, the ability to locate the North Star has been a crucial skill for travelers, sailors, and escaped slaves seeking freedom.',
         'Southward migration of birds in winter is one of nature\'s most impressive phenomena. This annual journey, triggered by changing daylight and food availability, sees millions of birds traveling vast distances. The south, representing warmth and abundance in this context, becomes a seasonal refuge. This migratory pattern has influenced human cultures, from ancient augury practices to modern conservation efforts. It also serves as a poignant reminder of the interconnectedness of global ecosystems and the impacts of climate change.',
-        'West coast to east coast road trip captures the essence of cross-country adventure in many nations. In the United States, this journey spans diverse landscapes, from the Pacific beaches through mountains and plains to the Atlantic seaboard. Such trips often symbolize personal growth, cultural exploration, and the discovery of national identity. The contrasts between west and east coasts - in climate, culture, and pace of life - offer travelers a comprehensive experience of their country\'s diversity.',
-        'The Great Wall stretches east to west, a monumental testament to human engineering and determination. This ancient fortification, spanning thousands of kilometers across northern China, was built to protect against nomadic invasions. Its east-west orientation follows the natural boundaries between agricultural China and the steppes of Central Asia. The Wall has become a powerful symbol of Chinese civilization and the country\'s historical focus on protecting its heartland from northern threats.',
-        'Northernmost point of the continent often represents the ultimate challenge for explorers and adventurers. Whether it\'s Cape Morris Jesup in Greenland or Point Barrow in Alaska, these extreme locations embody the human drive to push boundaries. The north, associated with cold, darkness, and isolation, has long fascinated scientists, explorers, and writers. Indigenous peoples of these regions have developed unique cultures adapted to these harsh environments, offering valuable lessons in resilience and sustainable living.',
-        'Southeast Asian tropical climate shapes a region rich in biodiversity and cultural diversity. This part of the world, where the southeast orientation often leads to warm waters and lush landscapes, is home to ancient civilizations and modern economic powerhouses. The tropical monsoon climate influences agriculture, architecture, and daily life. Southeast Asia\'s location at the crossroads of major cultural influences - Indian, Chinese, and Western - has resulted in a fascinating blend of traditions and innovations.',
-        'Western frontier of the old world once represented the edge of the known to ancient Mediterranean civilizations. This concept of a western limit shifted over time, from the Pillars of Hercules (Strait of Gibraltar) to the Americas. The west has often symbolized mystery, opportunity, and the unknown in various cultures. Historically, westward exploration led to significant cultural exchanges, conflicts, and the reshaping of global power dynamics, especially during the Age of Exploration and colonial periods.',
-        'Due south to reach the equator, a journey that traverses climate zones and ecosystems. This meridional travel showcases the Earth\'s diverse environments, from temperate or polar regions to the tropics. The equator, an imaginary line dividing the planet into northern and southern hemispheres, plays a crucial role in climate patterns, daylight duration, and even satellite orbits. Cultures near the equator have developed unique adaptations to their environment, influencing everything from architecture to agricultural practices.',
-        'East meets West at the international date line, an imaginary line on the surface of the Earth that runs from the North Pole to the South Pole and demarcates the change of one calendar day to the next. This concept highlights the arbitrary nature of timekeeping and date designation in a round world. The phrase "East meets West" also symbolizes cultural exchange and fusion, representing the intersection of Eastern and Western philosophies, traditions, and ways of life in our increasingly interconnected global society.'
     ]).test()

@@ -7,15 +7,14 @@ from sklearn.neighbors import NearestNeighbors
 from grokfast import gradfilter_ema
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, distance_weight=1, lr=0.001, num_epochs=5, training_set=None, logprob_fn=None, weight_decay=0):
+    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, lr=0.001, num_epochs=5, training_set=None, logprob_fn=None, weight_decay=0):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = 4096
+        self.hidden_dim = 2048
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.temporal_weight = temporal_weight
-        self.distance_weight = distance_weight
         self.lr = lr
         self.weight_decay = weight_decay
         self.global_pool = nn.AdaptiveAvgPool1d(1)
@@ -48,48 +47,42 @@ class Autoencoder(nn.Module):
         return encoded, decoded, x_pooled
 
     def normalize(self, encoded):
-        # Apply L2 normalization
         norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
         normalized_encoded = encoded / norm
         return normalized_encoded
-    def temporal_penalty(self, encoded_prev, encoded_next, state):
-        # Normalize vectors
+
+    def temporal_penalty(self, encoded_prev, encoded_next, state_prev, state):
         encoded_prev_norm = F.normalize(encoded_prev, p=2, dim=-1)
         encoded_next_norm = F.normalize(encoded_next, p=2, dim=-1)
         state_norm = F.normalize(state, p=2, dim=-1)
-        prev_state_norm = F.normalize(self.prev_state, p=2, dim=-1)
-
-        # Calculate losses using normalized vectors
-        encoded_loss = F.mse_loss(encoded_prev_norm, encoded_next_norm)**2
-        state_loss = F.mse_loss(prev_state_norm, state_norm)
-
-        # Calculate the difference
+        prev_state_norm = F.normalize(state_prev, p=2, dim=-1)
+        encoded_loss = F.mse_loss(encoded_prev_norm, encoded_next_norm)
+        state_loss = F.mse_loss(prev_state_norm, state_norm)**2
         loss_diff = encoded_loss - state_loss
-
         return self.temporal_weight * loss_diff.abs()
 
     def train_sample(self, sample):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         layer = 0
         sum_loss = 0
+        prev_encoded = None
+        prev_state = None
+        total_loss = torch.tensor(0.0, requires_grad=True)
         for data in sample:
             optimizer.zero_grad()
             encoded, decoded, pooled = self(data.float())
             loss = self.criterion(decoded, pooled)
             temporal_loss = 0
             if layer > 1 and layer < len(sample) - 3:
-                temporal_loss = self.temporal_penalty(self.prev_encoded, encoded, data)
-            self.prev_logprobs = self.logprob_fn(data)
-            self.prev_state = data
-            total_loss = loss + temporal_loss
-            print(f'l{layer}\tloss {loss.item():.3g}\ttemporal {temporal_loss:.3g}\ttotal {total_loss.item():.3g}')
-            total_loss.backward(retain_graph=True)
-            self.grads = gradfilter_ema(self, grads=self.grads)
-            optimizer.step()
-            self.prev_encoded = encoded.detach()
+                temporal_loss = self.temporal_penalty(prev_encoded, encoded, prev_state, data)
+            prev_state = data
+            total_loss = total_loss + loss + temporal_loss
+            prev_encoded = encoded.detach()
             layer += 1
-            sum_loss += total_loss.item()
-        print(f'sum loss: {sum_loss}')
+        total_loss.backward(retain_graph=True)
+        self.grads = gradfilter_ema(self, grads=self.grads)
+        optimizer.step()
+        return total_loss
 
     def train_set(self):
         self.prev_encoded = None
@@ -99,5 +92,6 @@ class Autoencoder(nn.Module):
                 print('lr descend')
                 self.lr = self.lr / 3
             self.grads = None
-            for sample in self.training_set:
-                self.train_sample(sample)
+            for i, sample in enumerate(self.training_set):
+                sample_loss = self.train_sample(sample)
+                print(f'{epoch}:{i}\tloss {sample_loss.item():.3g}')
