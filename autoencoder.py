@@ -56,10 +56,10 @@ class Autoencoder(nn.Module):
         encoded_next_norm = F.normalize(encoded_next, p=2, dim=-1)
         state_norm = F.normalize(state, p=2, dim=-1)
         prev_state_norm = F.normalize(state_prev, p=2, dim=-1)
-        encoded_loss = F.mse_loss(encoded_prev_norm, encoded_next_norm)
-        state_loss = F.mse_loss(prev_state_norm, state_norm)**2
+        encoded_loss = torch.dist(encoded_prev_norm, encoded_next_norm, p=2)
+        state_loss = torch.dist(prev_state_norm, state_norm, p=2)
         loss_diff = encoded_loss - state_loss
-        return self.temporal_weight * loss_diff.abs()
+        return self.temporal_weight * loss_diff.abs(), state_loss
 
     def train_sample(self, sample):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -68,21 +68,23 @@ class Autoencoder(nn.Module):
         prev_encoded = None
         prev_state = None
         total_loss = torch.tensor(0.0, requires_grad=True)
+        sum_state = 0
         for data in sample:
             optimizer.zero_grad()
             encoded, decoded, pooled = self(data.float())
             loss = self.criterion(decoded, pooled)
             temporal_loss = 0
-            if layer > 1 and layer < len(sample) - 3:
-                temporal_loss = self.temporal_penalty(prev_encoded, encoded, prev_state, data)
-            prev_state = data
+            if layer > 0:
+                temporal_loss, state_loss = self.temporal_penalty(prev_encoded, encoded, prev_state, data)
+                sum_state += state_loss
+            prev_state = data.detach()
             total_loss = total_loss + loss + temporal_loss
             prev_encoded = encoded.detach()
             layer += 1
         total_loss.backward(retain_graph=True)
         self.grads = gradfilter_ema(self, grads=self.grads)
         optimizer.step()
-        return total_loss
+        return total_loss, sum_state
 
     def train_set(self):
         self.prev_encoded = None
@@ -93,5 +95,5 @@ class Autoencoder(nn.Module):
                 self.lr = self.lr / 3
             self.grads = None
             for i, sample in enumerate(self.training_set):
-                sample_loss = self.train_sample(sample)
-                print(f'{epoch}:{i}\tloss {sample_loss.item():.3g}')
+                sample_loss, sum_state = self.train_sample(sample)
+                print(f'{epoch}:{i}\tloss {sample_loss.item():.3f}\tstate change {sum_state:.3f}')
