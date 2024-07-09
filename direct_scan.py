@@ -20,6 +20,7 @@ class Scan():
         torch.set_float32_matmul_precision('medium')
 
         self.model_name = 'openai-community/gpt2-medium'
+        # self.model_name = 'Qwen/Qwen2-0.5B'
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, trust_remote_code=True, quantization_config=quantization_config)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
@@ -39,7 +40,7 @@ class Scan():
         for prompt in self.prompts:
             pre_enc = self.tokenizer(prompt, return_tensors='pt', return_attention_mask=False)
             pre_tok_len = pre_enc['input_ids'].shape[1]
-            prompt = f'ARITHMETIC SYSTEM INITIALIZED\n\nQUESTION: {prompt}\nANSWER: ',
+            prompt = f'ARITHMETIC SYSTEM INITIALIZED\n\nQUESTION: {prompt}\nANSWER:',
             enc = self.tokenizer(prompt, return_tensors='pt', return_attention_mask=False)
             input_ids = enc['input_ids'].to(self.device)
             tok_len = input_ids.shape[1]
@@ -54,12 +55,10 @@ class Scan():
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(4096, 3),
-            temporal_weight=0.1,
-            lr=6e-4,
-            weight_decay=0.001,
-            num_epochs=9,
-            training_set=self.states,
-            logprob_fn=self.logprobs,
+            temporal_weight=1e-3,
+            lr=1e-4,
+            weight_decay=0.01,
+            num_epochs=6,
         ).to(self.device)
         self.embeddings = self.autoencode()
 
@@ -72,7 +71,7 @@ class Scan():
         return normed_states
 
     def autoencode(self):
-        self.autoencoder.train_set()
+        self.autoencoder.train_set(self.states)
         res = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[0]]
         return res
 
@@ -120,10 +119,15 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
-        '2 + 3 =',
+        '12 + 1 =',
         '7 - 4 =',
         '12 + 7 * 2 =',
         '99 / 3 =',
         '4 + 7 + 11 =',
-        '22 - 5 ='
+        '22 - 5 =',
+        '12 + 9 / 3 =',
+        '972 * 45 =',
+        '34862 - 20847 =',
+        '44 + 55 - 7 =',
+        '94 / 6 + 3 =',
     ]).test()

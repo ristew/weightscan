@@ -7,42 +7,44 @@ from sklearn.neighbors import NearestNeighbors
 from grokfast import gradfilter_ema
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 3), temporal_weight=1e6, lr=0.001, num_epochs=5, training_set=None, logprob_fn=None, weight_decay=0):
+    def __init__(self, input_dim, compressed_dim=(1024, 3), hidden_dim=2048, temporal_weight=1e6, lr=0.001, num_epochs=5, weight_decay=0):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = 2048
+        self.hidden_dim = input_dim * 2;
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.temporal_weight = temporal_weight
         self.lr = lr
         self.weight_decay = weight_decay
         self.global_pool = nn.AdaptiveAvgPool1d(1)
-        self.encoder_input = nn.Linear(input_dim, self.hidden_dim)
-        self.encoder_hidden = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.encoder_output = nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1])
-        self.decoder_input = nn.Linear(compressed_dim[0] * compressed_dim[1], self.hidden_dim)
-        self.decoder_hidden = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.decoder_output = nn.Linear(self.hidden_dim, input_dim)
-        self.training_set = training_set
-        self.logprob_fn = logprob_fn
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, self.hidden_dim),
+            nn.ELU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ELU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ELU(),
+            nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1]),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(compressed_dim[0] * compressed_dim[1], self.hidden_dim),
+            nn.ELU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ELU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ELU(),
+            nn.Linear(self.hidden_dim, input_dim),
+        )
 
     def forward(self, x):
         x_pooled = self.global_pool(x.transpose(1, 2))
         x_pooled = x_pooled.squeeze(-1)
-        a = self.encoder_input(x_pooled)
-        a = torch.relu(a)
-        a = self.encoder_hidden(a)
-        a = torch.relu(a)
-        a = self.encoder_output(a)
+        a = self.encoder(x_pooled)
         encoded = a.view(-1, self.compressed_dim[0], self.compressed_dim[1])
         encoded = self.normalize(encoded)
         a = encoded.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
-        b = self.decoder_input(a)
-        b = torch.relu(b)
-        a = self.decoder_hidden(b)
-        b = torch.relu(b)
-        b = self.decoder_output(b)
+        b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded, x_pooled
 
@@ -74,7 +76,7 @@ class Autoencoder(nn.Module):
             encoded, decoded, pooled = self(data.float())
             loss = self.criterion(decoded, pooled)
             temporal_loss = 0
-            if layer > 0:
+            if layer > 0 and layer < len(sample) - 3:
                 temporal_loss, state_loss = self.temporal_penalty(prev_encoded, encoded, prev_state, data)
                 sum_state += state_loss
             prev_state = data.detach()
@@ -86,7 +88,7 @@ class Autoencoder(nn.Module):
         optimizer.step()
         return total_loss, sum_state
 
-    def train_set(self):
+    def train_set(self, training_set):
         self.prev_encoded = None
         for epoch in range(self.num_epochs):
             self.epoch = epoch
@@ -94,6 +96,6 @@ class Autoencoder(nn.Module):
                 print('lr descend')
                 self.lr = self.lr / 3
             self.grads = None
-            for i, sample in enumerate(self.training_set):
+            for i, sample in enumerate(training_set):
                 sample_loss, sum_state = self.train_sample(sample)
                 print(f'{epoch}:{i}\tloss {sample_loss.item():.3f}\tstate change {sum_state:.3f}')
