@@ -19,8 +19,8 @@ class Scan():
         torch.set_default_tensor_type(torch.cuda.FloatTensor if self.device.type == 'cuda' else torch.FloatTensor)
         torch.set_float32_matmul_precision('medium')
 
-        self.model_name = 'openai-community/gpt2-medium'
-        # self.model_name = 'Qwen/Qwen2-0.5B'
+        # self.model_name = 'openai-community/gpt2-medium'
+        self.model_name = 'HuggingFaceTB/SmolLM-135M'
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, trust_remote_code=True, quantization_config=quantization_config)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
@@ -33,32 +33,34 @@ class Scan():
             return self.model.model.final_layernorm(state)
         elif self.model_name.startswith('openai-community/gpt2'):
             return self.model.transformer.ln_f(state)
+        elif self.model_name == 'EleutherAI/pythia-410m':
+            return self.model.gpt_neox.final_layer_norm(state)
         else:
             return self.model.model.norm(state)
 
+    def decode_tok(self, idx):
+        return self.tokenizer.decode([idx.item()])
+
     def forward(self):
         for prompt in self.prompts:
-            pre_enc = self.tokenizer(prompt, return_tensors='pt', return_attention_mask=False)
-            pre_tok_len = pre_enc['input_ids'].shape[1]
-            prompt = f'ARITHMETIC SYSTEM INITIALIZED\n\nQUESTION: {prompt}\nANSWER:',
             enc = self.tokenizer(prompt, return_tensors='pt', return_attention_mask=False)
             input_ids = enc['input_ids'].to(self.device)
             tok_len = input_ids.shape[1]
-            print(f'prompt {prompt}\ttok_len {tok_len}')
-            for i in range(tok_len - pre_tok_len, tok_len):
+            print(f'prompt {prompt}\ntok_len {tok_len}')
+            for i in range(1, tok_len + 1):
                 toks = input_ids[:, :i]
                 output = self.model.forward(toks, output_hidden_states=True)
+                top_prob, top_index = torch.topk(F.softmax(output.logits[0, -1, :], dim=-1), 1)
+                print(self.decode_tok(toks[0, -1]), self.decode_tok(top_index), top_prob.item())
                 states = self.get_normed_states(output)
                 self.states.append(states)
-                del output
 
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(4096, 3),
-            temporal_weight=1e-3,
-            lr=1e-4,
-            weight_decay=0.01,
-            num_epochs=6,
+            lr=8e-4,
+            weight_decay=0.001,
+            num_epochs=2,
         ).to(self.device)
         self.embeddings = self.autoencode()
 
@@ -72,11 +74,15 @@ class Scan():
 
     def autoencode(self):
         self.autoencoder.train_set(self.states)
-        res = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[0]]
+        res = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[-1]]
         return res
 
     def logits(self, state):
-        return self.model.lm_head(state.unsqueeze(0)).float()
+        state = state.unsqueeze(0)
+        if self.model_name == 'EleutherAI/pythia-410m':
+            return self.model.embed_out(state).float()
+        else:
+            return self.model.lm_head(state).float()
 
     def logprobs(self, state):
         logits = self.logits(state)
@@ -97,13 +103,13 @@ class Scan():
 
     def visualize(self):
         points = [(p * 64).tolist() for p in self.embeddings]
-        tops = [self.top_tokens(self.states[0][i]) for i in range(len(self.embeddings))]
+        tops = [self.top_tokens(self.states[-1][i]) for i in range(len(self.embeddings))]
         nn_indices = self.find_nearest_neighbors(points)
 
         data = json.dumps({
             'points': points,
             'tops': tops,
-            'prompt': self.prompts[0],
+            'prompt': self.prompts[-1],
             'neighbors': nn_indices
         })
         with open('visualize_template.html', 'r') as template_file:
@@ -119,15 +125,15 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
-        '12 + 1 =',
-        '7 - 4 =',
-        '12 + 7 * 2 =',
-        '99 / 3 =',
-        '4 + 7 + 11 =',
-        '22 - 5 =',
-        '12 + 9 / 3 =',
-        '972 * 45 =',
-        '34862 - 20847 =',
-        '44 + 55 - 7 =',
-        '94 / 6 + 3 =',
+'Standing atop the hyperbridge at the end of time, ready to let loose, 12 45 72 END',
+'Welcome to the new kind of bread show, big fish',
+'Bagel crab bagel crab bagel',
+'''Bagel/Tuna=>Bagel
+Shrimp/Baguette=>Baguette
+Lobster/Ciabatta=>Ciabatta
+Sourdough/Crab=>Sourdough
+Focaccia/Cod=>Focaccia
+Rye/Anchovies=>Rye
+Mussels/Brioche=>Brioche
+Salmon/Croissant=>''',
     ]).test()
