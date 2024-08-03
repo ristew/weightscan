@@ -41,6 +41,13 @@ class Scan():
     def decode_tok(self, idx):
         return self.tokenizer.decode([idx.item()])
 
+    def forward_toks(self, toks):
+        output = self.model.forward(toks, output_hidden_states=True)
+        top_prob, top_index = torch.topk(F.softmax(output.logits[0, -1, :], dim=-1), 1)
+        print(self.decode_tok(toks[0, -1]), self.decode_tok(top_index), top_prob.item())
+        states = self.get_normed_states(output)
+        self.states.append(states)
+
     def forward(self):
         for prompt in self.prompts:
             enc = self.tokenizer(prompt, return_tensors='pt', return_attention_mask=False)
@@ -48,19 +55,15 @@ class Scan():
             tok_len = input_ids.shape[1]
             print(f'prompt {prompt}\ntok_len {tok_len}')
             for i in range(1, tok_len + 1):
-                toks = input_ids[:, :i]
-                output = self.model.forward(toks, output_hidden_states=True)
-                top_prob, top_index = torch.topk(F.softmax(output.logits[0, -1, :], dim=-1), 1)
-                print(self.decode_tok(toks[0, -1]), self.decode_tok(top_index), top_prob.item())
-                states = self.get_normed_states(output)
-                self.states.append(states)
+                self.forward_toks(input_ids[:, i-1:i])
+                self.forward_toks(input_ids[:, :i])
 
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(4096, 3),
-            lr=8e-4,
+            lr=8e-5,
             weight_decay=0.001,
-            num_epochs=2,
+            num_epochs=3,
         ).to(self.device)
         self.embeddings = self.autoencode()
 
