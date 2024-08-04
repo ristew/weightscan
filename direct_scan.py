@@ -61,9 +61,9 @@ class Scan():
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(4096, 3),
-            lr=8e-5,
+            lr=1e-3,
             weight_decay=0.001,
-            num_epochs=3,
+            num_epochs=1,
         ).to(self.device)
         self.embeddings = self.autoencode()
 
@@ -128,9 +128,6 @@ class Scan():
 
 if __name__ == '__main__':
     Scan([
-'Standing atop the hyperbridge at the end of time, ready to let loose, 12 45 72 END',
-'Welcome to the new kind of bread show, big fish',
-'Bagel crab bagel crab bagel',
 '''Bagel/Tuna=>Bagel
 Shrimp/Baguette=>Baguette
 Lobster/Ciabatta=>Ciabatta

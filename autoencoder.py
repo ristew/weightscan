@@ -43,8 +43,6 @@ class Autoencoder(nn.Module):
         encoded = torch.fft.fftn(encoded).real
         encoded = self.normalize(encoded)
         a = encoded
-        # a = torch.fft.ifftn(encoded).real
-        # a = self.normalize(a)
         a = a.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
@@ -57,23 +55,27 @@ class Autoencoder(nn.Module):
 
     def train_sample(self, sample):
         layer = 0
-        sum_loss = 0
         prev_encoded = None
         prev_state = None
         total_loss = torch.tensor(0.0, requires_grad=True)
+        total_diff_loss = torch.tensor(0.0, requires_grad=True)
         sum_delaunay = 0
         for data in sample:
             self.optimizer.zero_grad()
             encoded, decoded, pooled = self(data.float())
-            loss = self.criterion(decoded, pooled)
-            prev_state = data.detach()
-            total_loss = total_loss + loss
+            reconstruction_loss = self.criterion(decoded, pooled)
+            if prev_encoded is not None:
+                diff_loss = 5e3 * self.criterion(encoded, prev_encoded)
+                total_loss = total_loss + reconstruction_loss + diff_loss
+                total_diff_loss = total_diff_loss + diff_loss
+            else:
+                total_loss = total_loss + reconstruction_loss
             prev_encoded = encoded.detach()
             layer += 1
         total_loss.backward(retain_graph=True)
         self.grads = gradfilter_ema(self, grads=self.grads)
         self.optimizer.step()
-        return total_loss
+        return total_loss, total_diff_loss
 
     def train_set(self, training_set):
         self.prev_encoded = None
@@ -85,7 +87,7 @@ class Autoencoder(nn.Module):
             #     self.weight_decay /= 10
             self.grads = None
             for i, sample in enumerate(training_set):
-                sample_loss = self.train_sample(sample)
-                print(f'{epoch}:{i}\tloss {sample_loss.item():.3f}')
+                sample_loss, diff_loss = self.train_sample(sample)
+                print(f'{epoch}:{i}\tloss {sample_loss.item():.3f}\tdiff {diff_loss.item():.3f}')
             self.scheduler.step()
             self.lr = self.lr / 4
