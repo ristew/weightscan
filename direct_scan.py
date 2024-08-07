@@ -61,7 +61,7 @@ class Scan():
         self.autoencoder = Autoencoder(
             input_dim=self.states[0][0][0][0].size()[0],
             compressed_dim=(4096, 3),
-            lr=1e-3,
+            lr=3e-4,
             weight_decay=0.001,
             num_epochs=1,
         ).to(self.device)
@@ -132,7 +132,6 @@ if __name__ == '__main__':
 Shrimp/Baguette=>Baguette
 Lobster/Ciabatta=>Ciabatta
 Sourdough/Crab=>Sourdough
-Focaccia/Cod=>Focaccia
 Rye/Anchovies=>Rye
 Mussels/Brioche=>Brioche
 Salmon/Croissant=>''',

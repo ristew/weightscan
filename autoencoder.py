@@ -20,30 +20,41 @@ class Autoencoder(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, self.hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1]),
+        )
+        self.encoder2 = nn.Sequential(
+            nn.Linear(compressed_dim[0] * compressed_dim[1], compressed_dim[0] * compressed_dim[1]),
         )
         self.decoder = nn.Sequential(
             nn.Linear(compressed_dim[0] * compressed_dim[1], self.hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(self.hidden_dim, input_dim),
         )
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        self.scheduler = ExponentialLR(self.optimizer, gamma=0.8)
+        self.scheduler = ExponentialLR(self.optimizer, gamma=0.9)
 
+    def view_points(self, t):
+        return t.view(-1, self.compressed_dim[0], self.compressed_dim[1])
+    def points_t(self, points):
+        return points.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
     def forward(self, x):
         x_pooled = self.global_pool(x.transpose(1, 2))
         x_pooled = x_pooled.squeeze(-1)
         a = self.encoder(x_pooled)
-        encoded = a.view(-1, self.compressed_dim[0], self.compressed_dim[1])
-        encoded = torch.fft.fftn(encoded).real
-        encoded = self.normalize(encoded)
-        a = encoded
-        a = a.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
+        a = self.view_points(a)
+        a = torch.fft.fftn(a).real
+        a = self.points_t(a)
+        a = self.encoder2(a)
+        a = self.view_points(a)
+        a = self.normalize(a)
+        encoded = a
+        a = self.points_t(a)
+        a = a + torch.randn_like(a) * 0.25
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded, x_pooled
@@ -90,4 +101,3 @@ class Autoencoder(nn.Module):
                 sample_loss, diff_loss = self.train_sample(sample)
                 print(f'{epoch}:{i}\tloss {sample_loss.item():.3f}\tdiff {diff_loss.item():.3f}')
             self.scheduler.step()
-            self.lr = self.lr / 4
