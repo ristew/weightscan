@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -35,7 +36,7 @@ class Autoencoder(nn.Module):
             nn.GELU(),
             nn.Linear(self.hidden_dim, input_dim),
         )
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay, betas=(0.9, 0.998))
         self.scheduler = ExponentialLR(self.optimizer, gamma=0.9)
 
     def view_points(self, t):
@@ -54,7 +55,8 @@ class Autoencoder(nn.Module):
         a = self.normalize(a)
         encoded = a
         a = self.points_t(a)
-        a = a + torch.randn_like(a) * 0.25
+        slide = 0.3
+        a = a + torch.randn_like(a) * 0.08 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded, x_pooled
@@ -76,7 +78,7 @@ class Autoencoder(nn.Module):
             encoded, decoded, pooled = self(data.float())
             reconstruction_loss = self.criterion(decoded, pooled)
             if prev_encoded is not None:
-                diff_loss = 5e3 * self.criterion(encoded, prev_encoded)
+                diff_loss = 1e2 * self.criterion(encoded, prev_encoded)
                 total_loss = total_loss + reconstruction_loss + diff_loss
                 total_diff_loss = total_diff_loss + diff_loss
             else:
@@ -84,7 +86,7 @@ class Autoencoder(nn.Module):
             prev_encoded = encoded.detach()
             layer += 1
         total_loss.backward(retain_graph=True)
-        self.grads = gradfilter_ema(self, grads=self.grads)
+        # self.grads = gradfilter_ema(self, grads=self.grads)
         self.optimizer.step()
         return total_loss, total_diff_loss
 
@@ -92,12 +94,26 @@ class Autoencoder(nn.Module):
         self.prev_encoded = None
         for epoch in range(self.num_epochs):
             self.epoch = epoch
-            # if epoch == self.num_epochs - self.num_epochs // 3:
-            #     print('lr descend')
-            #     self.lr /= 3
-            #     self.weight_decay /= 10
             self.grads = None
             for i, sample in enumerate(training_set):
                 sample_loss, diff_loss = self.train_sample(sample)
                 print(f'{epoch}:{i}\tloss {sample_loss.item():.3f}\tdiff {diff_loss.item():.3f}')
             self.scheduler.step()
+        self.save_checkpoint()
+
+    def save_checkpoint(self, checkpoint_dir='weights', filename='checkpoint.pth'):
+        checkpoint = {
+            'epoch': self.epoch,
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict()
+        }
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        torch.save(checkpoint, os.path.join(checkpoint_dir, filename))
+
+    def load_checkpoint(self, checkpoint_dir='weights', filename='checkpoint.pth'):
+        checkpoint = torch.load(os.path.join(checkpoint_dir, filename))
+        self.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.epoch = checkpoint['epoch'] + 1
