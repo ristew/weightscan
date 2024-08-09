@@ -115,7 +115,7 @@ class Visualizer:
 
 if __name__ == '__main__':
     prompts = [
-        "In my younger and more vulnerable years my father gave me some advice that I've been turning over in my mind ever since.",
+        "Gatsby was",
         # ... (include all the prompts here)
     ]
     visualizer = Visualizer(prompts)

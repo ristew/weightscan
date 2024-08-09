@@ -13,7 +13,7 @@ class Autoencoder(nn.Module):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = input_dim * 2;
+        self.hidden_dim = 768
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.lr = lr
