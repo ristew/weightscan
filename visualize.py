@@ -1,9 +1,14 @@
 import json
 import torch
 import torch.nn.functional as F
+import imageio
+from PIL import Image
+import io
+import numpy as np
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from autoencoder import Autoencoder
 from sklearn.neighbors import NearestNeighbors
+import os
 
 class Visualizer:
     def __init__(self, prompts, model_name='HuggingFaceTB/SmolLM-135M'):
@@ -56,7 +61,7 @@ class Visualizer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(4096, 3),
+            compressed_dim=(2048, 2),
         ).to(self.device)
         self.autoencoder.load_state_dict(torch.load(filename))
         self.autoencoder.eval()
@@ -107,16 +112,37 @@ class Visualizer:
                 out_file.write(modified)
                 print('wrote modified template')
 
+    def visualize_2d(self):
+        frame_size = 256
+        scaled_embeddings = []
+        for layer_embeddings in self.embeddings:
+            min_vals = layer_embeddings.min(dim=0, keepdim=True).values
+            max_vals = layer_embeddings.max(dim=0, keepdim=True).values
+            scaled = ((layer_embeddings - min_vals) / (max_vals - min_vals)) * (frame_size - 1)
+            scaled_embeddings.append(scaled.cpu().detach().numpy().astype(int))
+        print('visualizing', min_vals, max_vals)
+        images = []
+        for idx, layer_points in enumerate(scaled_embeddings):
+            img = np.zeros((frame_size, frame_size, 3), dtype=np.uint8)
+            for pidx, point in enumerate(layer_points):
+                pn = pidx / len(layer_points)
+                x, y = point
+                img[y, x] = (255, 128, 128)
+            image = Image.fromarray(img)
+            images.append(image)
+        video_path = "layer_animation.mp4"
+        imageio.mimsave(video_path, images, format='MP4', fps=4)
+        print(f"Animation saved to {video_path}")
+
     def run(self):
         self.forward()
         self.load_autoencoder()
         self.encode()
-        self.visualize()
+        self.visualize_2d()
 
 if __name__ == '__main__':
     prompts = [
         "Gatsby was",
-        # ... (include all the prompts here)
     ]
     visualizer = Visualizer(prompts)
     visualizer.run()

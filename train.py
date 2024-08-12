@@ -67,10 +67,10 @@ class Trainer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(4096, 3),
-            lr=2e-4,
+            compressed_dim=(2048, 2),
+            lr=3e-4,
             weight_decay=0.001,
-            num_epochs=1,
+            num_epochs=10,
         ).to(self.device)
         self.autoencoder.train_set(self.states)
         self.save_weights()
@@ -84,9 +84,11 @@ if __name__ == '__main__':
         "In my younger and more vulnerable years my father gave me some advice that I’ve been turning over in my mind ever since.",
         "“Whenever you feel like criticizing anyone,” he told me, “just remember that all the people in this world haven’t had the advantages that you’ve had.”",
         "He didn’t say any more, but we’ve always been unusually communicative in a reserved way, and I understood that he meant a great deal more than that.",
+
         "In consequence, I’m inclined to reserve all judgements, a habit that has opened up many curious natures to me and also made me the victim of not a few veteran bores.",
         "The abnormal mind is quick to detect and attach itself to this quality when it appears in a normal person, and so it came about that in college I was unjustly accused of being a politician, because I was privy to the secret griefs of wild, unknown men.",
-        # "Most of the confidences were unsought—frequently I have feigned sleep, preoccupation, or a hostile levity when I realized by some unmistakable sign that an intimate revelation was quivering on the horizon;",
+        "Most of the confidences were unsought—frequently I have feigned sleep, preoccupation, or a hostile levity when I realized by some unmistakable sign that an intimate revelation was quivering on the horizon;",
+
         # "for the intimate revelations of young men, or at least the terms in which they express them, are usually plagiaristic and marred by obvious suppressions.",
         # "Reserving judgements is a matter of infinite hope.",
         # "I am still a little afraid of missing something if I forget that, as my father snobbishly suggested, and I snobbishly repeat, a sense of the fundamental decencies is parcelled out unequally at birth.",
