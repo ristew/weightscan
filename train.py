@@ -68,9 +68,9 @@ class Trainer:
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
             compressed_dim=(2048, 2),
-            lr=3e-4,
+            lr=1e-4,
             weight_decay=0.001,
-            num_epochs=10,
+            num_epochs=5,
         ).to(self.device)
         self.autoencoder.train_set(self.states)
         self.save_weights()

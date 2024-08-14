@@ -113,7 +113,7 @@ class Visualizer:
                 print('wrote modified template')
 
     def visualize_2d(self):
-        frame_size = 256
+        frame_size = 512
         scaled_embeddings = []
         for layer_embeddings in self.embeddings:
             min_vals = layer_embeddings.min(dim=0, keepdim=True).values
@@ -127,7 +127,7 @@ class Visualizer:
             for pidx, point in enumerate(layer_points):
                 pn = pidx / len(layer_points)
                 x, y = point
-                img[y, x] = (255, 128, 128)
+                img[y, x] = (255, 255, 255)
             image = Image.fromarray(img)
             images.append(image)
         video_path = "layer_animation.mp4"
@@ -142,7 +142,7 @@ class Visualizer:
 
 if __name__ == '__main__':
     prompts = [
-        "Gatsby was",
+        "The thing about men like Gatsby",
     ]
     visualizer = Visualizer(prompts)
     visualizer.run()

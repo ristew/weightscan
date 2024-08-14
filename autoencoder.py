@@ -55,8 +55,8 @@ class Autoencoder(nn.Module):
         a = self.normalize(a)
         encoded = a
         a = self.points_t(a)
-        slide = 0.3
-        a = a + torch.randn_like(a) * 0.08 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
+        slide = 0.01
+        a = a + torch.randn_like(a) * slide / 4 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded, x_pooled
@@ -65,32 +65,13 @@ class Autoencoder(nn.Module):
         norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
         normalized_encoded = encoded / norm
         return normalized_encoded
-    def kernel_density_estimation(self, encoded, bandwidth=0.005):
-        # Calculate pairwise squared distances using torch.cdist
-        sq_dist = torch.cdist(encoded, encoded, p=2) ** 2
 
-        # Compute the kernel using the Gaussian function
-        kernel = torch.exp(-sq_dist / (2 * bandwidth ** 2))
-
-        # Calculate the KDE values
-        kde_values = kernel.sum(dim=1) - 1  # Subtract 1 to exclude self-similarity
-
-        # Return the mean KDE value
-        return torch.mean(kde_values) / encoded.shape[0]
     def average_nearest_neighbor_loss(self, encoded):
-        # Compute pairwise distances
         pairwise_distances = torch.cdist(encoded, encoded, p=2)
-
-        # Create a mask to ignore self-distances
         mask = torch.eye(pairwise_distances.size(0), device=pairwise_distances.device).bool()
         pairwise_distances = pairwise_distances.masked_fill(mask, float('inf'))
-
-        # Find the distance to the nearest neighbor for each point
         nearest_neighbor_distances, _ = torch.min(pairwise_distances, dim=1)
-
-        # Return the mean of these distances as the loss
         return nearest_neighbor_distances.mean()
-
 
     def train_sample(self, sample):
         layer = 0
@@ -104,7 +85,7 @@ class Autoencoder(nn.Module):
             self.optimizer.zero_grad()
             encoded, decoded, pooled = self(data.float())
             reconstruction_loss = self.criterion(decoded, pooled)
-            ann_loss = 2e2 * self.average_nearest_neighbor_loss(encoded.squeeze())
+            ann_loss = 1e5 * self.average_nearest_neighbor_loss(encoded.squeeze())**2
             if prev_encoded is not None:
                 diff_loss = 1e2 * self.criterion(encoded, prev_encoded)
                 total_loss = total_loss + reconstruction_loss + diff_loss + ann_loss
