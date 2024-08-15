@@ -48,14 +48,17 @@ class Trainer:
             tok_len = input_ids.shape[1]
             print(f'prompt {prompt}\ntok_len {tok_len}')
             for i in range(1, tok_len + 1):
-                self.forward_toks(input_ids[:, i-1:i])
-                self.forward_toks(input_ids[:, :i])
+                for j in range(i - 1):
+                    print(i, j)
+                    self.forward_toks(input_ids[:, (i-j-1):i])
+                # self.forward_toks(input_ids[:, :i])
+                # self.forward_toks(input_ids[:, i-1:i])
 
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
         print('hidden state shape', hidden_states[0][0].shape)
         normed_states = [self.norm(hs).detach() for hs in hidden_states[:-1]]
-        final = hidden_states[-1]
+        final = hidden_states[-1].detach()
         normed_states.append(final)
         return normed_states
 
@@ -67,10 +70,10 @@ class Trainer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(2048, 2),
-            lr=1e-4,
-            weight_decay=0.001,
-            num_epochs=5,
+            compressed_dim=(1024, 2),
+            lr=4e-5,
+            weight_decay=0.01,
+            num_epochs=2,
         ).to(self.device)
         self.autoencoder.train_set(self.states)
         self.save_weights()
@@ -89,10 +92,10 @@ if __name__ == '__main__':
         "The abnormal mind is quick to detect and attach itself to this quality when it appears in a normal person, and so it came about that in college I was unjustly accused of being a politician, because I was privy to the secret griefs of wild, unknown men.",
         "Most of the confidences were unsought—frequently I have feigned sleep, preoccupation, or a hostile levity when I realized by some unmistakable sign that an intimate revelation was quivering on the horizon;",
 
-        # "for the intimate revelations of young men, or at least the terms in which they express them, are usually plagiaristic and marred by obvious suppressions.",
-        # "Reserving judgements is a matter of infinite hope.",
-        # "I am still a little afraid of missing something if I forget that, as my father snobbishly suggested, and I snobbishly repeat, a sense of the fundamental decencies is parcelled out unequally at birth.",
-        # "And, after boasting this way of my tolerance, I come to the admission that it has a limit.",
+        "for the intimate revelations of young men, or at least the terms in which they express them, are usually plagiaristic and marred by obvious suppressions.",
+        "Reserving judgements is a matter of infinite hope.",
+        "I am still a little afraid of missing something if I forget that, as my father snobbishly suggested, and I snobbishly repeat, a sense of the fundamental decencies is parcelled out unequally at birth.",
+        "And, after boasting this way of my tolerance, I come to the admission that it has a limit.",
         # "Conduct may be founded on the hard rock or the wet marshes, but after a certain point I don’t care what it’s founded on.",
         # "When I came back from the East last autumn I felt that I wanted the world to be in uniform and at a sort of moral attention forever;",
         # "I wanted no more riotous excursions with privileged glimpses into the human heart.",

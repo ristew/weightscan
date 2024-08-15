@@ -61,7 +61,7 @@ class Visualizer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(2048, 2),
+            compressed_dim=(1024, 2),
         ).to(self.device)
         self.autoencoder.load_state_dict(torch.load(filename))
         self.autoencoder.eval()
@@ -142,7 +142,7 @@ class Visualizer:
 
 if __name__ == '__main__':
     prompts = [
-        "The thing about men like Gatsby",
+        "A man like Jay Gatsby",
     ]
     visualizer = Visualizer(prompts)
     visualizer.run()

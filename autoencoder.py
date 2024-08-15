@@ -8,6 +8,10 @@ from torch.optim.lr_scheduler import ExponentialLR
 from sklearn.neighbors import NearestNeighbors
 from grokfast import gradfilter_ema
 
+class FFT(nn.Module):
+    def forward(self, x):
+        return torch.fft.fftn(x).real
+
 class Autoencoder(nn.Module):
     def __init__(self, input_dim, compressed_dim=(1024, 3), hidden_dim=2048, lr=0.001, num_epochs=5, weight_decay=0):
         super(Autoencoder, self).__init__()
@@ -21,20 +25,19 @@ class Autoencoder(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, self.hidden_dim),
-            nn.GELU(),
+            FFT(),
             nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.GELU(),
-            nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1]),
-        )
-        self.encoder2 = nn.Sequential(
-            nn.Linear(compressed_dim[0] * compressed_dim[1], compressed_dim[0] * compressed_dim[1]),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1])
         )
         self.decoder = nn.Sequential(
-            nn.Linear(compressed_dim[0] * compressed_dim[1], self.hidden_dim),
-            nn.GELU(),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.GELU(),
-            nn.Linear(self.hidden_dim, input_dim),
+            nn.Linear(compressed_dim[0] * compressed_dim[1], input_dim),
         )
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay, betas=(0.9, 0.998))
         self.scheduler = ExponentialLR(self.optimizer, gamma=0.9)
@@ -44,22 +47,13 @@ class Autoencoder(nn.Module):
     def points_t(self, points):
         return points.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
     def forward(self, x):
-        x_pooled = self.global_pool(x.transpose(1, 2))
-        x_pooled = x_pooled.squeeze(-1)
-        a = self.encoder(x_pooled)
-        a = self.view_points(a)
-        a = torch.fft.fftn(a).real
-        a = self.points_t(a)
-        a = self.encoder2(a)
-        a = self.view_points(a)
-        a = self.normalize(a)
-        encoded = a
-        a = self.points_t(a)
-        slide = 0.01
-        a = a + torch.randn_like(a) * slide / 4 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
+        a = self.encoder(x)
+        encoded = self.view_points(a)
+        slide = 0.5
+        a = a + torch.randn_like(a) * slide * 0.05 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
-        return encoded, decoded, x_pooled
+        return encoded, decoded
 
     def normalize(self, encoded):
         norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
@@ -83,20 +77,24 @@ class Autoencoder(nn.Module):
         sum_delaunay = 0
         for data in sample:
             self.optimizer.zero_grad()
-            encoded, decoded, pooled = self(data.float())
-            reconstruction_loss = self.criterion(decoded, pooled)
-            ann_loss = 1e5 * self.average_nearest_neighbor_loss(encoded.squeeze())**2
+            data = data.squeeze(0)[-1].float() # only look at the last token
+            encoded, decoded = self(data)
+            reconstruction_loss = self.criterion(decoded, data) / 2
+            ann_loss = 1e1 * self.average_nearest_neighbor_loss(encoded.squeeze())
+            layer_loss = reconstruction_loss + ann_loss
+            total_loss = total_loss + layer_loss
+            # layer_loss.backward(retain_graph=True)
+            # self.optimizer.step()
             if prev_encoded is not None:
-                diff_loss = 1e2 * self.criterion(encoded, prev_encoded)
-                total_loss = total_loss + reconstruction_loss + diff_loss + ann_loss
+                diff_loss = self.criterion(encoded, prev_encoded)
+                total_loss = total_loss + diff_loss
                 total_diff_loss = total_diff_loss + diff_loss
-            else:
-                total_loss = total_loss + reconstruction_loss + ann_loss
             total_ann_loss = total_ann_loss + ann_loss
             prev_encoded = encoded.detach()
             layer += 1
         total_loss.backward(retain_graph=True)
         self.optimizer.step()
+        self.grads = gradfilter_ema(self, self.grads)
         return total_loss, total_diff_loss, total_ann_loss
 
     def train_set(self, training_set):
