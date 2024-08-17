@@ -75,26 +75,27 @@ class Autoencoder(nn.Module):
         total_diff_loss = torch.tensor(0.0, requires_grad=True)
         total_ann_loss = torch.tensor(0.0, requires_grad=True)
         sum_delaunay = 0
-        for data in sample:
+        for data in (sample[0], sample[4], sample[-4], sample[-1]):
             self.optimizer.zero_grad()
             data = data.squeeze(0)[-1].float() # only look at the last token
             encoded, decoded = self(data)
-            reconstruction_loss = self.criterion(decoded, data) / 2
-            ann_loss = 1e1 * self.average_nearest_neighbor_loss(encoded.squeeze())
+            reconstruction_loss = 2 * self.criterion(decoded, data)
+            ann_loss = 5e1 * self.average_nearest_neighbor_loss(encoded.squeeze())
             layer_loss = reconstruction_loss + ann_loss
             total_loss = total_loss + layer_loss
             # layer_loss.backward(retain_graph=True)
             # self.optimizer.step()
-            if prev_encoded is not None:
-                diff_loss = self.criterion(encoded, prev_encoded)
-                total_loss = total_loss + diff_loss
-                total_diff_loss = total_diff_loss + diff_loss
+            # if prev_encoded is not None:
+            #     diff_loss = self.criterion(encoded, prev_encoded)
+            #     total_loss = total_loss + diff_loss
+            #     total_diff_loss = total_diff_loss + diff_loss
+            #     layer_loss += diff_loss
             total_ann_loss = total_ann_loss + ann_loss
             prev_encoded = encoded.detach()
             layer += 1
-        total_loss.backward(retain_graph=True)
-        self.optimizer.step()
-        self.grads = gradfilter_ema(self, self.grads)
+            layer_loss.backward(retain_graph=True)
+            self.optimizer.step()
+            self.grads = gradfilter_ema(self, self.grads)
         return total_loss, total_diff_loss, total_ann_loss
 
     def train_set(self, training_set):
