@@ -1,6 +1,7 @@
 import torch
 import json
 import numpy as np
+import random
 import torch.nn as nn
 import torch.nn.functional as F
 import gc
@@ -69,11 +70,12 @@ class Trainer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(1024, 2),
-            lr=7e-5,
-            weight_decay=0.01,
-            num_epochs=2,
+            compressed_dim=(2048, 3),
+            lr=4e-4,
+            weight_decay=1e-5,
+            num_epochs=3,
         ).to(self.device)
+        random.shuffle(self.states)
         self.autoencoder.train_set(self.states)
         self.save_weights()
 
@@ -95,7 +97,7 @@ if __name__ == '__main__':
         "Reserving judgements is a matter of infinite hope.",
         "I am still a little afraid of missing something if I forget that, as my father snobbishly suggested, and I snobbishly repeat, a sense of the fundamental decencies is parcelled out unequally at birth.",
         "And, after boasting this way of my tolerance, I come to the admission that it has a limit.",
-        # "Conduct may be founded on the hard rock or the wet marshes, but after a certain point I don’t care what it’s founded on.",
+        "Conduct may be founded on the hard rock or the wet marshes, but after a certain point I don’t care what it’s founded on.",
         # "When I came back from the East last autumn I felt that I wanted the world to be in uniform and at a sort of moral attention forever;",
         # "I wanted no more riotous excursions with privileged glimpses into the human heart.",
         # "Only Gatsby, the man who gives his name to this book, was exempt from my reaction—Gatsby, who represented everything for which I have an unaffected scorn.",

@@ -61,14 +61,14 @@ class Visualizer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(1024, 2),
+            compressed_dim=(2048, 3),
         ).to(self.device)
         self.autoencoder.load_state_dict(torch.load(filename))
         self.autoencoder.eval()
         print(f"Autoencoder weights loaded from {filename}")
 
     def encode(self):
-        self.embeddings = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[-1]]
+        self.embeddings = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[0]]
 
     def logits(self, state):
         state = state.unsqueeze(0)
@@ -96,7 +96,7 @@ class Visualizer:
 
     def visualize(self):
         points = [(p * 64).tolist() for p in self.embeddings]
-        tops = [self.top_tokens(self.states[-1][i]) for i in range(len(self.embeddings))]
+        tops = [self.top_tokens(self.states[0][i]) for i in range(len(self.embeddings))]
         nn_indices = self.find_nearest_neighbors(points)
 
         data = json.dumps({
@@ -138,7 +138,7 @@ class Visualizer:
         self.forward()
         self.load_autoencoder()
         self.encode()
-        self.visualize_2d()
+        self.visualize()
 
 if __name__ == '__main__':
     prompts = [

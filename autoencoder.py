@@ -22,24 +22,13 @@ class Autoencoder(nn.Module):
         self.criterion = nn.MSELoss()
         self.lr = lr
         self.weight_decay = weight_decay
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, self.hidden_dim),
-            FFT(),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, compressed_dim[0] * compressed_dim[1])
+            nn.Linear(self.input_dim, compressed_dim[0] * compressed_dim[1])
         )
         self.decoder = nn.Sequential(
             nn.Linear(compressed_dim[0] * compressed_dim[1], input_dim),
         )
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay, betas=(0.9, 0.998))
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay, betas=(0.95, 0.998))
         self.scheduler = ExponentialLR(self.optimizer, gamma=0.9)
 
     def view_points(self, t):
@@ -48,9 +37,10 @@ class Autoencoder(nn.Module):
         return points.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
     def forward(self, x):
         a = self.encoder(x)
-        encoded = self.view_points(a)
-        slide = 0.5
-        a = a + torch.randn_like(a) * slide * 0.05 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
+        encoded = self.normalize(self.view_points(a))
+        a = self.points_t(encoded)
+        slide = torch.mean(torch.abs(a)).item() / 10
+        a = a + torch.randn_like(a) * slide * 0.1 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded
@@ -75,16 +65,17 @@ class Autoencoder(nn.Module):
         total_diff_loss = torch.tensor(0.0, requires_grad=True)
         total_ann_loss = torch.tensor(0.0, requires_grad=True)
         sum_delaunay = 0
-        for data in (sample[0], sample[4], sample[-4], sample[-1]):
+        for data in sample:
             self.optimizer.zero_grad()
-            data = data.squeeze(0)[-1].float() # only look at the last token
+            data = data.squeeze(0)[0].float() # only look at the first token
             encoded, decoded = self(data)
-            reconstruction_loss = 2 * self.criterion(decoded, data)
-            ann_loss = 5e1 * self.average_nearest_neighbor_loss(encoded.squeeze())
-            layer_loss = reconstruction_loss + ann_loss
+            reconstruction_loss = self.criterion(decoded, data)
+            ann_loss = 2e-2 * self.average_nearest_neighbor_loss(encoded.squeeze())
+            layer_loss = reconstruction_loss# + ann_loss
             total_loss = total_loss + layer_loss
-            # layer_loss.backward(retain_graph=True)
-            # self.optimizer.step()
+            layer_loss.backward(retain_graph=True)
+            self.optimizer.step()
+            self.grads = gradfilter_ema(self, self.grads)
             # if prev_encoded is not None:
             #     diff_loss = self.criterion(encoded, prev_encoded)
             #     total_loss = total_loss + diff_loss
@@ -93,9 +84,9 @@ class Autoencoder(nn.Module):
             total_ann_loss = total_ann_loss + ann_loss
             prev_encoded = encoded.detach()
             layer += 1
-            layer_loss.backward(retain_graph=True)
-            self.optimizer.step()
-            self.grads = gradfilter_ema(self, self.grads)
+        # total_loss.backward(retain_graph=True)
+        # self.optimizer.step()
+        # self.grads = gradfilter_ema(self, self.grads)
         return total_loss, total_diff_loss, total_ann_loss
 
     def train_set(self, training_set):
