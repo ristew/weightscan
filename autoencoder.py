@@ -70,8 +70,8 @@ class Autoencoder(nn.Module):
             data = data.squeeze(0)[0].float() # only look at the first token
             encoded, decoded = self(data)
             reconstruction_loss = self.criterion(decoded, data)
-            ann_loss = 2e-2 * self.average_nearest_neighbor_loss(encoded.squeeze())
-            layer_loss = reconstruction_loss# + ann_loss
+            ann_loss = 7e-2 * self.average_nearest_neighbor_loss(encoded.squeeze())
+            layer_loss = reconstruction_loss + ann_loss
             total_loss = total_loss + layer_loss
             layer_loss.backward(retain_graph=True)
             self.optimizer.step()

@@ -38,7 +38,6 @@ class Trainer:
     def forward_toks(self, toks):
         output = self.model.forward(toks, output_hidden_states=True)
         top_prob, top_index = torch.topk(F.softmax(output.logits[0, -1, :], dim=-1), 1)
-        # print(self.decode_tok(toks[0, -1]), self.decode_tok(top_index), top_prob.item())
         states = self.get_normed_states(output)
         self.states.append(states)
 
@@ -51,12 +50,9 @@ class Trainer:
             for i in range(1, tok_len + 1):
                 for j in range(i - 1):
                     self.forward_toks(input_ids[:, (i-j-1):i])
-                # self.forward_toks(input_ids[:, :i])
-                # self.forward_toks(input_ids[:, i-1:i])
 
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
-        # print('hidden state shape', hidden_states[0][0].shape)
         normed_states = [self.norm(hs).detach() for hs in hidden_states[:-1]]
         final = hidden_states[-1].detach()
         normed_states.append(final)
@@ -71,9 +67,9 @@ class Trainer:
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
             compressed_dim=(2048, 3),
-            lr=4e-4,
+            lr=8e-5,
             weight_decay=1e-5,
-            num_epochs=3,
+            num_epochs=1,
         ).to(self.device)
         random.shuffle(self.states)
         self.autoencoder.train_set(self.states)
