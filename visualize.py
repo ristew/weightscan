@@ -11,7 +11,7 @@ from sklearn.neighbors import NearestNeighbors
 import os
 
 class Visualizer:
-    def __init__(self, prompts, model_name='HuggingFaceTB/SmolLM-135M'):
+    def __init__(self, prompts, model_name='unsloth/Llama-3.2-1B'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
 
@@ -20,7 +20,7 @@ class Visualizer:
 
         self.model_name = model_name
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, trust_remote_code=True, quantization_config=quantization_config)
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 5
         self.prompts = prompts
@@ -95,8 +95,8 @@ class Visualizer:
         return nn
 
     def visualize(self):
-        points = [(p * 64).tolist() for p in self.embeddings]
-        tops = [self.top_tokens(self.states[0][i]) for i in range(len(self.embeddings))]
+        points = [p.tolist() for p in self.embeddings]
+        tops = [self.top_tokens(self.states[-1][i]) for i in range(len(self.embeddings))]
         nn_indices = self.find_nearest_neighbors(points)
 
         data = json.dumps({
@@ -142,7 +142,7 @@ class Visualizer:
 
 if __name__ == '__main__':
     prompts = [
-        "A man like Jay Gatsby",
+        "If personality is an unbroken series of successful gestures, then there was something gorgeous about him, some heightened sensitivity to the promises of life, as if he were related to one of those intricate machines that register earthquakes ten thousand"
     ]
     visualizer = Visualizer(prompts)
     visualizer.run()

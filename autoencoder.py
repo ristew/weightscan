@@ -13,16 +13,19 @@ class FFT(nn.Module):
         return torch.fft.fftn(x).real
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(1024, 3), hidden_dim=2048, lr=0.001, num_epochs=5, weight_decay=0):
+    def __init__(self, input_dim, compressed_dim=(1024, 3), hidden_dim=2048, lr=0.001, num_epochs=5, weight_decay=0, diff_factor=0, ann_factor=0):
         super(Autoencoder, self).__init__()
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
-        self.hidden_dim = 768
+        self.hidden_dim = 1536
         self.num_epochs = num_epochs
         self.criterion = nn.MSELoss()
         self.lr = lr
         self.weight_decay = weight_decay
+        self.diff_factor = diff_factor
+        self.ann_factor = ann_factor
         self.encoder = nn.Sequential(
+            # FFT(),
             nn.Linear(self.input_dim, compressed_dim[0] * compressed_dim[1])
         )
         self.decoder = nn.Sequential(
@@ -39,7 +42,7 @@ class Autoencoder(nn.Module):
         a = self.encoder(x)
         encoded = self.normalize(self.view_points(a))
         a = self.points_t(encoded)
-        slide = torch.mean(torch.abs(a)).item() / 10
+        slide = torch.mean(torch.abs(a)).item() / 100
         a = a + torch.randn_like(a) * slide * 0.1 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
@@ -47,7 +50,7 @@ class Autoencoder(nn.Module):
 
     def normalize(self, encoded):
         norm = (LA.norm(encoded, ord=2, dim=1, keepdim=True) + 1) / 2
-        normalized_encoded = encoded / norm
+        normalized_encoded = 64 * encoded / norm
         return normalized_encoded
 
     def average_nearest_neighbor_loss(self, encoded):
@@ -57,7 +60,7 @@ class Autoencoder(nn.Module):
         nearest_neighbor_distances, _ = torch.min(pairwise_distances, dim=1)
         return nearest_neighbor_distances.mean()
 
-    def train_sample(self, sample):
+    def train_sample(self, sample, batch_layers=False):
         layer = 0
         prev_encoded = None
         prev_state = None
@@ -70,23 +73,29 @@ class Autoencoder(nn.Module):
             data = data.squeeze(0)[0].float() # only look at the first token
             encoded, decoded = self(data)
             reconstruction_loss = self.criterion(decoded, data)
-            ann_loss = 7e-2 * self.average_nearest_neighbor_loss(encoded.squeeze())
-            layer_loss = reconstruction_loss + ann_loss
+            if layer == 0 or layer == len(sample) - 1:
+                reconstruction_loss = reconstruction_loss * 3
+            layer_loss = reconstruction_loss
+            if self.ann_factor > 0:
+                ann_loss = self.ann_factor * self.average_nearest_neighbor_loss(encoded.squeeze())
+                layer_loss += ann_loss
+                total_ann_loss = total_ann_loss + ann_loss
+            if self.diff_factor > 0 and prev_encoded is not None:
+                diff_loss = self.diff_factor * self.criterion(encoded, prev_encoded)
+                layer_loss += diff_loss
+                total_diff_loss = total_diff_loss + diff_loss
             total_loss = total_loss + layer_loss
-            layer_loss.backward(retain_graph=True)
-            self.optimizer.step()
-            self.grads = gradfilter_ema(self, self.grads)
-            # if prev_encoded is not None:
-            #     diff_loss = self.criterion(encoded, prev_encoded)
-            #     total_loss = total_loss + diff_loss
-            #     total_diff_loss = total_diff_loss + diff_loss
-            #     layer_loss += diff_loss
-            total_ann_loss = total_ann_loss + ann_loss
+            if not batch_layers:
+                layer_loss.backward(retain_graph=True)
+                self.optimizer.step()
+                self.grads = gradfilter_ema(self, self.grads)
             prev_encoded = encoded.detach()
             layer += 1
-        # total_loss.backward(retain_graph=True)
-        # self.optimizer.step()
-        # self.grads = gradfilter_ema(self, self.grads)
+        if batch_layers:
+            batch_loss = total_loss + total_ann_loss + total_diff_loss
+            batch_loss.backward(retain_graph=True)
+            self.optimizer.step()
+            self.grads = gradfilter_ema(self, self.grads)
         return total_loss, total_diff_loss, total_ann_loss
 
     def train_set(self, training_set):

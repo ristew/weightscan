@@ -9,7 +9,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from autoencoder import Autoencoder
 
 class Trainer:
-    def __init__(self, prompts, model_name='HuggingFaceTB/SmolLM-135M'):
+    def __init__(self, prompts, model_name='unsloth/Llama-3.2-1B'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
 
@@ -48,8 +48,8 @@ class Trainer:
             tok_len = input_ids.shape[1]
             print(f'prompt {prompt}\ntok_len {tok_len}')
             for i in range(1, tok_len + 1):
-                for j in range(i - 1):
-                    self.forward_toks(input_ids[:, (i-j-1):i])
+                self.forward_toks(input_ids[:, 0:i])
+                # for j in range(i - 1):
 
     def get_normed_states(self, output):
         hidden_states = output.hidden_states
@@ -67,9 +67,11 @@ class Trainer:
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
             compressed_dim=(2048, 3),
-            lr=8e-5,
-            weight_decay=1e-5,
+            lr=4e-5,
+            weight_decay=1e-4,
             num_epochs=1,
+            diff_factor=0e1,
+            ann_factor=0e-2,
         ).to(self.device)
         random.shuffle(self.states)
         self.autoencoder.train_set(self.states)
@@ -94,12 +96,12 @@ if __name__ == '__main__':
         "I am still a little afraid of missing something if I forget that, as my father snobbishly suggested, and I snobbishly repeat, a sense of the fundamental decencies is parcelled out unequally at birth.",
         "And, after boasting this way of my tolerance, I come to the admission that it has a limit.",
         "Conduct may be founded on the hard rock or the wet marshes, but after a certain point I don’t care what it’s founded on.",
-        # "When I came back from the East last autumn I felt that I wanted the world to be in uniform and at a sort of moral attention forever;",
-        # "I wanted no more riotous excursions with privileged glimpses into the human heart.",
-        # "Only Gatsby, the man who gives his name to this book, was exempt from my reaction—Gatsby, who represented everything for which I have an unaffected scorn.",
+        "When I came back from the East last autumn I felt that I wanted the world to be in uniform and at a sort of moral attention forever;",
+        "I wanted no more riotous excursions with privileged glimpses into the human heart.",
+        "Only Gatsby, the man who gives his name to this book, was exempt from my reaction—Gatsby, who represented everything for which I have an unaffected scorn.",
         # "If personality is an unbroken series of successful gestures, then there was something gorgeous about him, some heightened sensitivity to the promises of life, as if he were related to one of those intricate machines that register earthquakes ten thousand miles away.",
-        # "This responsiveness had nothing to do with that flabby impressionability which is dignified under the name of the “creative temperament”—it was an extraordinary gift for hope, a romantic readiness such as I have never found in any other person and which it is not likely I shall ever find again.",
-        # "No—Gatsby turned out all right at the end; it is what preyed on Gatsby, what foul dust floated in the wake of his dreams that temporarily closed out my interest in the abortive sorrows and short-winded elations of men."
+        "This responsiveness had nothing to do with that flabby impressionability which is dignified under the name of the “creative temperament”—it was an extraordinary gift for hope, a romantic readiness such as I have never found in any other person and which it is not likely I shall ever find again.",
+        "No—Gatsby turned out all right at the end; it is what preyed on Gatsby, what foul dust floated in the wake of his dreams that temporarily closed out my interest in the abortive sorrows and short-winded elations of men."
     ]
     trainer = Trainer(prompts)
     trainer.train()
