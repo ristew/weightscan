@@ -66,8 +66,8 @@ class Trainer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(2048, 3),
-            lr=4e-5,
+            compressed_dim=(768, 3),
+            lr=6e-5,
             weight_decay=1e-4,
             num_epochs=1,
             diff_factor=0e1,
@@ -99,7 +99,7 @@ if __name__ == '__main__':
         "When I came back from the East last autumn I felt that I wanted the world to be in uniform and at a sort of moral attention forever;",
         "I wanted no more riotous excursions with privileged glimpses into the human heart.",
         "Only Gatsby, the man who gives his name to this book, was exempt from my reaction—Gatsby, who represented everything for which I have an unaffected scorn.",
-        # "If personality is an unbroken series of successful gestures, then there was something gorgeous about him, some heightened sensitivity to the promises of life, as if he were related to one of those intricate machines that register earthquakes ten thousand miles away.",
+        "If personality is an unbroken series of successful gestures, then there was something gorgeous about him, some heightened sensitivity to the promises of life, as if he were related to one of those intricate machines that register earthquakes ten thousand miles away.",
         "This responsiveness had nothing to do with that flabby impressionability which is dignified under the name of the “creative temperament”—it was an extraordinary gift for hope, a romantic readiness such as I have never found in any other person and which it is not likely I shall ever find again.",
         "No—Gatsby turned out all right at the end; it is what preyed on Gatsby, what foul dust floated in the wake of his dreams that temporarily closed out my interest in the abortive sorrows and short-winded elations of men."
     ]

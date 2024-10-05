@@ -61,7 +61,7 @@ class Visualizer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(2048, 3),
+            compressed_dim=(768, 3),
         ).to(self.device)
         self.autoencoder.load_state_dict(torch.load(filename))
         self.autoencoder.eval()

@@ -93,6 +93,37 @@
         return [p1[0] / q, p1[1] / q, p1[2] / q];
       }
 
+      function addAxisLines() {
+        const axisLength = 8;
+        const axisColor = 0x008800; // Green color
+
+        // X-axis
+        const xAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(-axisLength, 0, 0),
+          new THREE.Vector3(axisLength, 0, 0)
+        ]);
+        const xAxisMaterial = new THREE.LineBasicMaterial({ color: axisColor });
+        const xAxisLine = new THREE.Line(xAxisGeometry, xAxisMaterial);
+        scene.add(xAxisLine);
+
+        // Y-axis
+        const yAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, -axisLength, 0),
+          new THREE.Vector3(0, axisLength, 0)
+        ]);
+        const yAxisMaterial = new THREE.LineBasicMaterial({ color: axisColor });
+        const yAxisLine = new THREE.Line(yAxisGeometry, yAxisMaterial);
+        scene.add(yAxisLine);
+
+        // Z-axis
+        const zAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, 0, -axisLength),
+          new THREE.Vector3(0, 0, axisLength)
+        ]);
+        const zAxisMaterial = new THREE.LineBasicMaterial({ color: axisColor });
+        const zAxisLine = new THREE.Line(zAxisGeometry, zAxisMaterial);
+        scene.add(zAxisLine);
+      }
 
       function neighborLine(frameIdx, pointIdx, neighborPairIdx) {
         const frame = POINTS[frameIdx];
@@ -188,6 +219,8 @@
           scene.add(line);
         }
       }
+
+      addAxisLines();
 
 
       // Modify animate function to include logic for adding lines

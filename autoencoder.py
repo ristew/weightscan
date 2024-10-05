@@ -25,8 +25,8 @@ class Autoencoder(nn.Module):
         self.diff_factor = diff_factor
         self.ann_factor = ann_factor
         self.encoder = nn.Sequential(
+            nn.Linear(self.input_dim, compressed_dim[0] * compressed_dim[1]),
             # FFT(),
-            nn.Linear(self.input_dim, compressed_dim[0] * compressed_dim[1])
         )
         self.decoder = nn.Sequential(
             nn.Linear(compressed_dim[0] * compressed_dim[1], input_dim),
@@ -42,8 +42,8 @@ class Autoencoder(nn.Module):
         a = self.encoder(x)
         encoded = self.normalize(self.view_points(a))
         a = self.points_t(encoded)
-        slide = torch.mean(torch.abs(a)).item() / 100
-        a = a + torch.randn_like(a) * slide * 0.1 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
+        slide = torch.mean(torch.abs(a)).item() / 8
+        a = a + torch.randn_like(a) * slide / 1280 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded
@@ -60,7 +60,19 @@ class Autoencoder(nn.Module):
         nearest_neighbor_distances, _ = torch.min(pairwise_distances, dim=1)
         return nearest_neighbor_distances.mean()
 
-    def train_sample(self, sample, batch_layers=False):
+    def radial_loss(self, encoded, r=1):
+        # Calculate the distance from each point to the origin
+        distances = torch.norm(encoded, dim=2)
+        
+        # Calculate the radial metric
+        metric = torch.exp(-((distances - r)**2) / (2 * r**2))
+        
+        # Calculate the loss
+        loss = torch.mean(metric)
+        
+        return 10 * loss
+
+    def train_sample(self, sample, batch_layers=True):
         layer = 0
         prev_encoded = None
         prev_state = None
@@ -75,7 +87,7 @@ class Autoencoder(nn.Module):
             reconstruction_loss = self.criterion(decoded, data)
             if layer == 0 or layer == len(sample) - 1:
                 reconstruction_loss = reconstruction_loss * 3
-            layer_loss = reconstruction_loss
+            layer_loss = reconstruction_loss + self.radial_loss(encoded)
             if self.ann_factor > 0:
                 ann_loss = self.ann_factor * self.average_nearest_neighbor_loss(encoded.squeeze())
                 layer_loss += ann_loss
