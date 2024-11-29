@@ -66,12 +66,10 @@ class Trainer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(768, 3),
-            lr=6e-5,
+            # compressed_dim=(768, 3),
+            lr=8e-5,
             weight_decay=1e-4,
-            num_epochs=1,
-            diff_factor=0e1,
-            ann_factor=0e-2,
+            num_epochs=3,
         ).to(self.device)
         random.shuffle(self.states)
         self.autoencoder.train_set(self.states)

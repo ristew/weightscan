@@ -14,10 +14,8 @@ class Visualizer:
     def __init__(self, prompts, model_name='unsloth/Llama-3.2-1B'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
-
         torch.set_default_tensor_type(torch.cuda.FloatTensor if self.device.type == 'cuda' else torch.FloatTensor)
         torch.set_float32_matmul_precision('medium')
-
         self.model_name = model_name
         quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, trust_remote_code=True)
@@ -61,14 +59,15 @@ class Visualizer:
         input_dim = self.states[0][0][0][0].size()[0]
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            compressed_dim=(768, 3),
+            # compressed_dim=(768, 3),
         ).to(self.device)
         self.autoencoder.load_state_dict(torch.load(filename))
         self.autoencoder.eval()
         print(f"Autoencoder weights loaded from {filename}")
 
     def encode(self):
-        self.embeddings = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[0]]
+        print('embedding', self.states[-1][0].shape)
+        self.embeddings = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[-1]]
 
     def logits(self, state):
         state = state.unsqueeze(0)
@@ -95,19 +94,17 @@ class Visualizer:
         return nn
 
     def visualize(self):
-        points = [p.tolist() for p in self.embeddings]
+        fields = [p.tolist() for p in self.embeddings]
         tops = [self.top_tokens(self.states[-1][i]) for i in range(len(self.embeddings))]
-        nn_indices = self.find_nearest_neighbors(points)
 
         data = json.dumps({
-            'points': points,
+            'fields': fields,
             'tops': tops,
             'prompt': self.prompts[-1],
-            'neighbors': nn_indices
         })
         with open('visualize_template.html', 'r') as template_file:
             template = template_file.read()
-            modified = template.replace('$$POINTS$$', data)
+            modified = template.replace('$$DATA$$', data)
             with open('visualize.html', 'w') as out_file:
                 out_file.write(modified)
                 print('wrote modified template')
