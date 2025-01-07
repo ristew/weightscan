@@ -13,7 +13,7 @@ class FFT(nn.Module):
         return torch.fft.fftn(x).real
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, compressed_dim=(256, 6), hidden_dim=512, lr=0.001, num_epochs=5, weight_decay=0, diff_factor=0, ann_factor=0):
+    def __init__(self, input_dim, compressed_dim=(1024, 6), hidden_dim=1536, lr=0.001, num_epochs=5, weight_decay=0, diff_factor=0, ann_factor=0):
         super(Autoencoder, self).__init__()
         # Note compressed_dim[1] is now 6 (3 for position, 3 for direction)
         self.input_dim = input_dim
@@ -37,20 +37,20 @@ class Autoencoder(nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(self.input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, compressed_dim[0] * compressed_dim[1]),
+            nn.Linear(hidden_dim, compressed_dim[0] * compressed_dim[1]),
         )
         
         # Decoder with nonlinear layers
         self.decoder = nn.Sequential(
-            nn.Linear(compressed_dim[0] * compressed_dim[1], hidden_dim // 2),
+            nn.Linear(compressed_dim[0] * compressed_dim[1], hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, input_dim),
         )
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay, betas=(0.95, 0.998))
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         self.scheduler = ExponentialLR(self.optimizer, gamma=0.9)
 
     def split_vector_field(self, encoded):
@@ -84,8 +84,8 @@ class Autoencoder(nn.Module):
         local_dirs = directions[neighbor_idx]
         dir_diffs = torch.norm(local_dirs - directions.unsqueeze(1), dim=2)
         smooth_loss = dir_diffs.mean(dim=1)
-        alignments_loss = 2 * alignments.mean()
-        smooth_loss = 1e-2 * smooth_loss.mean()
+        alignments_loss = 4 * alignments.mean()
+        smooth_loss = 1e-3 * smooth_loss.mean()
         # print('alignments', alignments_loss, 'smooth', smooth_loss, 'curve', curvature_loss)
         
         total_loss = alignments_loss + smooth_loss + curvature_loss
@@ -114,7 +114,7 @@ class Autoencoder(nn.Module):
             
             reconstruction_loss = self.criterion(decoded, pooled)
                 
-            vf_loss = self.manifold_vector_field_loss(positions.squeeze(), directions.squeeze())
+            vf_loss = 0.5 * self.manifold_vector_field_loss(positions.squeeze(), directions.squeeze())
             layer_loss = reconstruction_loss + vf_loss
 
             if layer == 0 or layer == len(sample) - 1:
@@ -153,8 +153,8 @@ class Autoencoder(nn.Module):
         randn = torch.randperm(encoded.size()[1])
         encoded = encoded[:, randn]
         a = self.points_t(encoded)
-        # slide = torch.mean(torch.abs(a)).item() / 8
-        # a = a + torch.randn_like(a) * slide / 1280 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
+        slide = torch.mean(torch.abs(a)).item() / 32
+        a = a + torch.randn_like(a) * slide / 128 + torch.full_like(a, torch.rand(1).item() * slide - slide / 2)
         b = self.decoder(a)
         decoded = b.view(-1, self.input_dim)
         return encoded, decoded, x_pooled
