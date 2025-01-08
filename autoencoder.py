@@ -15,7 +15,6 @@ class FFT(nn.Module):
 class Autoencoder(nn.Module):
     def __init__(self, input_dim, compressed_dim=(1024, 6), hidden_dim=1536, lr=0.001, num_epochs=5, weight_decay=0, diff_factor=0, ann_factor=0):
         super(Autoencoder, self).__init__()
-        # Note compressed_dim[1] is now 6 (3 for position, 3 for direction)
         self.input_dim = input_dim
         self.compressed_dim = compressed_dim
         self.hidden_dim = hidden_dim
@@ -27,13 +26,6 @@ class Autoencoder(nn.Module):
         self.ann_factor = ann_factor
         self.global_pool = nn.AdaptiveAvgPool1d(1)
         
-        # self.encoder = nn.Sequential(
-        #     nn.Linear(self.input_dim, compressed_dim[0] * compressed_dim[1]),
-        # )
-        # self.decoder = nn.Sequential(
-        #     nn.Linear(compressed_dim[0] * compressed_dim[1], input_dim),
-        # )
-        # Encoder with nonlinear layers
         self.encoder = nn.Sequential(
             nn.Linear(self.input_dim, hidden_dim),
             nn.ReLU(),
@@ -42,7 +34,6 @@ class Autoencoder(nn.Module):
             nn.Linear(hidden_dim, compressed_dim[0] * compressed_dim[1]),
         )
         
-        # Decoder with nonlinear layers
         self.decoder = nn.Sequential(
             nn.Linear(compressed_dim[0] * compressed_dim[1], hidden_dim),
             nn.ReLU(),
@@ -53,11 +44,49 @@ class Autoencoder(nn.Module):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         self.scheduler = ExponentialLR(self.optimizer, gamma=0.9)
 
+    def temporal_consistency_loss(self, positions1, positions2, directions1, directions2, hidden1, hidden2, base_alpha=0.1, min_thresh=0.01):
+        # Calculate hidden state differences and scale them meaningfully
+        hidden_delta = torch.norm(hidden2 - hidden1, dim=-1)
+        
+        # Get percentile-based thresholds from the batch
+        low_thresh = torch.quantile(hidden_delta, 0.25)
+        high_thresh = torch.quantile(hidden_delta, 0.75)
+        
+        # Scale delta to be between min_thresh and 1.0 based on the distribution
+        scaled_delta = min_thresh + (1.0 - min_thresh) * (hidden_delta - low_thresh) / (high_thresh - low_thresh + 1e-6)
+        scaled_delta = torch.clamp(scaled_delta, min_thresh, 1.0)
+        
+        # Calculate actual position and direction changes
+        position_delta = torch.norm(positions2 - positions1, dim=-1)
+        direction_delta = torch.norm(directions2 - directions1, dim=-1)
+        
+        # Loss encourages movement proportional to hidden state changes
+        position_loss = torch.mean(torch.abs(position_delta - scaled_delta))
+        direction_loss = torch.mean(torch.abs(direction_delta - scaled_delta))
+        
+        return position_loss + direction_loss
+
+    def flow_alignment_loss(self, positions1, positions2, directions1):
+        movement = positions2 - positions1
+        movement = F.normalize(movement, dim=-1)
+        alignment = torch.sum(movement * directions1, dim=-1)
+        return torch.mean(torch.abs(alignment))
+
+    def spatial_frequency_bias(self, positions):
+        # Take just x,y coordinates and reshape for 2D FFT
+        positions_2d = positions[..., :2]  # Take first two coordinates
+        fft = torch.fft.rfft2(positions_2d.float())
+        
+        # Create a simple frequency mask
+        freq_mask = torch.ones_like(fft)
+        if freq_mask.size(1) > 4:  # Only apply if we have enough frequencies
+            mid_idx = freq_mask.size(1) // 2
+            freq_mask[:, mid_idx-1:mid_idx+1] *= 2.0
+        
+        return torch.mean(torch.abs(fft * freq_mask))
     def split_vector_field(self, encoded):
-        # Split the encoded tensor into positions and directions
         positions = encoded[..., :3]
         directions = encoded[..., 3:]
-        # Normalize the direction vectors
         directions = F.normalize(directions, dim=-1)
         return positions, directions
 
@@ -70,12 +99,10 @@ class Autoencoder(nn.Module):
         centers = local_points.mean(dim=1, keepdim=True)
         centered = local_points - centers
         
-        # Compute curvature - encourage points to form more curved surfaces
-        rel_vectors = local_points - positions.unsqueeze(1)  # [batch, k, 3]
-        curvature = torch.abs(torch.sum(rel_vectors, dim=1))  # [batch, 3]
+        rel_vectors = local_points - positions.unsqueeze(1)
+        curvature = torch.abs(torch.sum(rel_vectors, dim=1))
         curvature_loss = 1e-2 * torch.norm(curvature, dim=1).mean()
         
-        # Original manifold calculations
         cov = torch.bmm(centered.transpose(1, 2), centered)
         eigenvalues, eigenvectors = torch.linalg.eigh(cov)
         normals = eigenvectors[:, :, 0]
@@ -84,27 +111,31 @@ class Autoencoder(nn.Module):
         local_dirs = directions[neighbor_idx]
         dir_diffs = torch.norm(local_dirs - directions.unsqueeze(1), dim=2)
         smooth_loss = dir_diffs.mean(dim=1)
-        alignments_loss = 4 * alignments.mean()
+        alignments_loss = 1 * alignments.mean()
         smooth_loss = 1e-3 * smooth_loss.mean()
-        # print('alignments', alignments_loss, 'smooth', smooth_loss, 'curve', curvature_loss)
         
         total_loss = alignments_loss + smooth_loss + curvature_loss
         
         return total_loss
 
     def normalize(self, encoded):
-        # Only normalize the position part
         positions, directions = self.split_vector_field(encoded)
         norm = (LA.norm(positions, ord=2, dim=1, keepdim=True) + 1) / 2
         normalized_positions = 64 * positions / norm
-        # Recombine with directions
         return torch.cat([normalized_positions, directions], dim=-1)
+
 
     def train_sample(self, sample, batch_layers=True):
         layer = 0
-        prev_encoded = None
+        prev_positions = None
+        prev_directions = None
+        prev_pooled = None
         total_loss = torch.tensor(0.0, requires_grad=True)
-        total_vf_loss = torch.tensor(0.0, requires_grad=True)
+        total_reconstruction_loss = 0
+        total_vf_loss = 0
+        total_temporal_loss = 0
+        total_flow_loss = 0
+        total_freq_loss = 0
         
         for data in sample:
             self.optimizer.zero_grad()
@@ -113,39 +144,61 @@ class Autoencoder(nn.Module):
             positions, directions = self.split_vector_field(encoded)
             
             reconstruction_loss = self.criterion(decoded, pooled)
+            total_reconstruction_loss = total_reconstruction_loss + reconstruction_loss.item()
+            vf_loss = 0.1 * self.manifold_vector_field_loss(positions.squeeze(), directions.squeeze())
+            total_vf_loss = total_vf_loss + vf_loss.item()
+            
+            if prev_positions is not None:
+                temporal_loss = 0.04 * self.temporal_consistency_loss(
+                    prev_positions, positions.squeeze(),
+                    prev_directions, directions.squeeze(),
+                    prev_pooled, pooled
+                )
+                flow_loss = 0.00 * self.flow_alignment_loss(
+                    prev_positions, positions.squeeze(),
+                    prev_directions
+                )
+                freq_loss = 0.000 * self.spatial_frequency_bias(positions.squeeze())
                 
-            vf_loss = 0.5 * self.manifold_vector_field_loss(positions.squeeze(), directions.squeeze())
-            layer_loss = reconstruction_loss + vf_loss
-
-            if layer == 0 or layer == len(sample) - 1:
-                layer_loss = layer_loss * 3
+                total_temporal_loss = total_temporal_loss + temporal_loss.item()
+                total_flow_loss = total_flow_loss + flow_loss.item()
+                total_freq_loss = total_freq_loss + freq_loss.item()
+                layer_loss = reconstruction_loss + vf_loss + temporal_loss + flow_loss + freq_loss
+            else:
+                layer_loss = reconstruction_loss + vf_loss
+            
+            prev_positions = positions.squeeze().detach()
+            prev_directions = directions.squeeze().detach()
+            prev_pooled = pooled.detach()
             
             total_loss = total_loss + layer_loss
-            total_vf_loss = total_vf_loss + vf_loss
             
             if not batch_layers:
                 layer_loss.backward(retain_graph=True)
                 self.optimizer.step()
                 self.grads = gradfilter_ema(self, self.grads)
-                
-            prev_encoded = encoded.detach()
+            
             layer += 1
             
         if batch_layers:
-            batch_loss = total_loss + total_vf_loss
-            batch_loss.backward(retain_graph=True)
+            total_loss.backward(retain_graph=True)
             self.optimizer.step()
             self.grads = gradfilter_ema(self, self.grads)
-            
-        return total_loss, total_vf_loss
-
+        
+        print(f'total: {total_loss.item():.2f}  '
+              f'loss: {total_reconstruction_loss:.2f}  '
+              f'vf: {total_vf_loss:.2f}  '
+              f'temporal: {total_temporal_loss:.2f}  '
+              f'flow: {total_flow_loss:.2f}  '
+              f'freq: {total_freq_loss:.2f}')
 
     def view_points(self, t):
         return t.view(-1, self.compressed_dim[0], self.compressed_dim[1])
+        
     def points_t(self, points):
         return points.view(-1, self.compressed_dim[0] * self.compressed_dim[1])
+        
     def forward(self, x):
-        # print('x', x.shape)
         x_pooled = self.global_pool(x.transpose(1, 2))
         x_pooled = x_pooled.squeeze(-1)
         a = self.encoder(x_pooled)
@@ -165,8 +218,8 @@ class Autoencoder(nn.Module):
             self.epoch = epoch
             self.grads = None
             for i, sample in enumerate(training_set):
-                sample_loss, vf_loss = self.train_sample(sample)
-                print(f'{epoch}:{i}\tloss {sample_loss.item():.3f}\tvf {vf_loss.item():.3f}')
+                print(f'{epoch}:{i}', end=' ')
+                self.train_sample(sample)
             self.scheduler.step()
         self.save_checkpoint()
 
