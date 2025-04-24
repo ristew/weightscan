@@ -57,8 +57,10 @@ class Visualizer:
 
     def load_autoencoder(self, filename='weights/checkpoint.pth'):
         input_dim = self.states[0][0][0][0].size()[0]
+        n_layers = len(self.states[0])
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
+            n_layers=n_layers,
             # compressed_dim=(768, 3),
         ).to(self.device)
         self.autoencoder.load_state_dict(torch.load(filename))
@@ -67,7 +69,7 @@ class Visualizer:
 
     def encode(self):
         print('embedding', self.states[-1][0].shape)
-        self.embeddings = [self.autoencoder(n.float().to(self.device))[0][0] for n in self.states[-1]]
+        self.embeddings = [self.autoencoder(hs.float().to(self.device), layer_idx=layer)[0][0] for layer, hs in enumerate(self.states[-1])]
 
     def logits(self, state):
         state = state.unsqueeze(0)
@@ -87,6 +89,7 @@ class Visualizer:
     def find_nearest_neighbors(self, embeddings, n_neighbors=4):
         nn = []
         for layer in embeddings:
+            layer = layer.cpu().detach().numpy()
             neighbors = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
             neighbors.fit(layer)
             distances, indices = neighbors.kneighbors(layer)
@@ -94,13 +97,17 @@ class Visualizer:
         return nn
 
     def visualize(self):
-        fields = [p.tolist() for p in self.embeddings]
+        points = [p.tolist() for p in self.embeddings]
         tops = [self.top_tokens(self.states[-1][i]) for i in range(len(self.embeddings))]
+        neighbors = self.find_nearest_neighbors(self.embeddings)
+        centroids = [layer.mean(dim=0).tolist() for layer in self.embeddings]
 
         data = json.dumps({
-            'fields': fields,
+            'points': points,
             'tops': tops,
             'prompt': self.prompts[-1],
+            'neighbors': neighbors,
+            'centroids': centroids,
         })
         with open('visualize_template.html', 'r') as template_file:
             template = template_file.read()

@@ -32,9 +32,13 @@
       import * as THREE from 'three';
       import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
       const DATA = $$DATA$$;
-      const FIELDS = DATA.fields;
+      const POINTS = DATA.points;
       const TOPS = DATA.tops;
       const PROMPT = DATA.prompt;
+      const NEIGHBORS = DATA.neighbors;
+      const CENTROIDS = DATA.centroids;
+      const META = [];
+      console.log('neighbors', DATA);
       document.getElementById('prompt-info').textContent = 'prompt: ' + PROMPT;
 
       const scene = new THREE.Scene();
@@ -57,7 +61,7 @@
         }, [0, 0, 0]);
         return sum.map(s => s / frame.length);
       }
-      const center = calculateCenter(FIELDS[0]);
+      const center = calculateCenter(POINTS[0]);
       console.log('center', center);
       controls.target.set(...center);
       // controls.autoRotate = true;
@@ -90,49 +94,32 @@
         return [p1[0] / q, p1[1] / q, p1[2] / q];
       }
 
-      function addAxisLines() {
-        const axisLength = 8;
-        const axisColor = 0x004422; // Green color
 
-        // X-axis
-        const xAxisGeometry = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(-axisLength, 0, 0),
-          new THREE.Vector3(axisLength, 0, 0)
-        ]);
-        const xAxisMaterial = new THREE.LineBasicMaterial({ color: axisColor });
-        const xAxisLine = new THREE.Line(xAxisGeometry, xAxisMaterial);
-        scene.add(xAxisLine);
+      function neighborLine(frameIdx, pointIdx, neighborPairIdx) {
+        const frame = POINTS[frameIdx];
+        const neighbors = NEIGHBORS[frameIdx];
+        const { maxDist, maxCenterDist } = META[frameIdx];
+        const neighborPair = neighbors[pointIdx][neighborPairIdx];
+        const neighborIdx = neighborPair[0];
+        const neighborDist = neighborPair[1];
+        const neighborWeight = Math.pow(1 - neighborDist / maxDist, 2);
+        const point = frame[pointIdx];
+        const neighborPointRaw = frame[neighborIdx];
 
-        // Y-axis
-        const yAxisGeometry = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(0, -axisLength, 0),
-          new THREE.Vector3(0, axisLength, 0)
-        ]);
-        const yAxisMaterial = new THREE.LineBasicMaterial({ color: axisColor });
-        const yAxisLine = new THREE.Line(yAxisGeometry, yAxisMaterial);
-        scene.add(yAxisLine);
+        const direction = sub(neighborPointRaw, point);
 
-        // Z-axis
-        const zAxisGeometry = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(0, 0, -axisLength),
-          new THREE.Vector3(0, 0, axisLength)
-        ]);
-        const zAxisMaterial = new THREE.LineBasicMaterial({ color: axisColor });
-        const zAxisLine = new THREE.Line(zAxisGeometry, zAxisMaterial);
-        scene.add(zAxisLine);
-      }
+        const magnitude = Math.sqrt(direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2);
+        const unitVector = divConst(direction, magnitude);
 
-      function vectorLine(frameIdx, pointIdx) {
-        const frame = FIELDS[frameIdx];
-        const vector = frame[pointIdx];
-        const point = vector.slice(0, 3);
-        const direction = vector.slice(3);
-        const dPoint = add(point, mulConst(direction, 0.25));
-        const color = new THREE.Color(1.0, 1.0, 1.0);
+        const neighborPoint = add(point, mulConst(unitVector, 0.07));
+
+        const centerDist = calculateDistance(point, center);
+        const centerWeight = Math.pow(1 - (centerDist / maxCenterDist), 2);
+        const color = new THREE.Color(neighborWeight, centerWeight * 0.3, 0.2 - 0.2 * neighborWeight);
         return {
           color,
           point,
-          dPoint,
+          neighborPoint,
         };
       }
       const EDGES = {};
@@ -140,8 +127,10 @@
 
       function frameObjects(frameIdx) {
         const objects = [];
-        const frame = FIELDS[frameIdx];
+        const frame = POINTS[frameIdx];
+        const neighbors = NEIGHBORS[frameIdx];
         EDGES[frameIdx] = [];
+        META[frameIdx] = {};
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(frame.flat());
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -153,38 +142,72 @@
           opacity: 0.8
         });
         const points = new THREE.Points(geometry, material);
+        let maxDist = 0;
+        for (const point of neighbors) { // just use second layer
+          for (const neighborPair of point) {
+            if (neighborPair[1] > maxDist) {
+              maxDist = neighborPair[1];
+            }
+          }
+        }
+        META[frameIdx].maxDist = maxDist;
+
+
+        const maxCenterDist = Math.max(...frame.map(p => calculateDistance(p, center)));
+        META[frameIdx].maxCenterDist = maxCenterDist;
 
         let lineIdx = 0;
         for (const pointIdx in frame) {
-          const { color, point, dPoint } = vectorLine(frameIdx, pointIdx);
-          const edge = {
-            lineIdx,
-            pointIdx,
-          };
-          EDGES[frameIdx].push(edge);
-          lineIdx++;
+          for (const neighborPairIdx in neighbors[pointIdx]) {
+            const { color, point, neighborPoint } = neighborLine(frameIdx, pointIdx, neighborPairIdx);
+            const edge = {
+              lineIdx,
+              pointIdx,
+              neighborPairIdx,
+            };
+            EDGES[frameIdx].push(edge);
+            lineIdx++;
+          }
         }
         return objects;
       }
-      for (const idx in FIELDS) {
+      for (const idx in POINTS) {
         layers.push(frameObjects(idx));
       }
 
-      for (const pointIdx in FIELDS[0]) {
-        const { color, point, dPoint } = vectorLine(0, pointIdx);
-        const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(...point),
-          new THREE.Vector3(...dPoint)
-        ]);
+      for (const pointIdx in POINTS[0]) {
+        for (const neighborPairIdx in NEIGHBORS[0][pointIdx]) {
+          const { color, point, neighborPoint } = neighborLine(0, pointIdx, neighborPairIdx);
+          const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(...point),
+            new THREE.Vector3(...neighborPoint)
+          ]);
 
-        const material = new THREE.LineBasicMaterial({ color });
-        const line = new THREE.Line(lineGeometry, material);
-        LINES.push({ line, material });
-        scene.add(line);
+          const material = new THREE.LineBasicMaterial({ color });
+          const line = new THREE.Line(lineGeometry, material);
+          LINES.push({ line, material });
+          scene.add(line);
+        }
       }
 
-      addAxisLines();
+      function addCentroidTrail() {
+        const trailGeom = new THREE.BufferGeometry();
+        const verts = new Float32Array(CENTROIDS.flat());
+        trailGeom.setAttribute('position', new THREE.BufferAttribute(verts,3));
+        const mat = new THREE.LineBasicMaterial({color:0xff8800});
+        const line = new THREE.Line(trailGeom, mat);
+        scene.add(line);
 
+        const sphereGeom = new THREE.SphereGeometry(0.6, 16, 16);
+        const sphereMat  = new THREE.MeshBasicMaterial({color:0xffff00});
+        CENTROIDS.forEach((c,i)=>{
+          const m = new THREE.Mesh(sphereGeom, sphereMat.clone());
+          m.position.set(...c);
+          m.material.color.offsetHSL(i/CENTROIDS.length,0,0);   // rainbow by layer
+          scene.add(m);
+        });
+      }
+      addCentroidTrail();
 
       // Modify animate function to include logic for adding lines
       function animate() {
@@ -195,11 +218,11 @@
           lastSwitchTime = now;
 
           for (const edge of EDGES[currentFrameIndex]) {
-            const { color, point, dPoint } = vectorLine(currentFrameIndex, edge.pointIdx);
+            const { color, point, neighborPoint } = neighborLine(currentFrameIndex, edge.pointIdx, edge.neighborPairIdx);
             // console.log('update edge', edge, color, point, neighborPoint);
             const { line, material } = LINES[edge.lineIdx];
             line.geometry.attributes.position.setXYZ(0, ...point);
-            line.geometry.attributes.position.setXYZ(1, ...dPoint);
+            line.geometry.attributes.position.setXYZ(1, ...neighborPoint);
             line.geometry.attributes.position.needsUpdate = true;
             material.color.set(color);
           }
@@ -209,7 +232,7 @@
             return `'${top[0]}' = ${top[1].toFixed(3)}\n`;
           });
 
-          currentFrameIndex = (currentFrameIndex + 1) % FIELDS.length;
+          currentFrameIndex = (currentFrameIndex + 1) % POINTS.length;
           if (step > 0) {
             step = step - 1;
             if (step <= 0) {
@@ -232,7 +255,7 @@
         if (e.key === '[') {
           currentFrameIndex = currentFrameIndex - 2;
           if (currentFrameIndex < 0) {
-            currentFrameIndex = FIELDS.length + currentFrameIndex;
+            currentFrameIndex = POINTS.length + currentFrameIndex;
           }
           step = 1;
           running = true;
