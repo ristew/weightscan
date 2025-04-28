@@ -74,7 +74,7 @@ class Trainer:
             num_epochs=10,
         ).to(self.device)
         random.shuffle(self.states)
-        self.autoencoder.train_set(self.states, layers=[i for i in range(2, n_layers - 2)])
+        self.autoencoder.train_set(self.states, layer_idx=n_layers // 2)
         self.save_weights()
 
     def save_weights(self, filename='weights/checkpoint.pth'):

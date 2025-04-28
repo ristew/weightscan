@@ -45,7 +45,6 @@ class Visualizer:
             input_ids = enc['input_ids'].to(self.device)
             tok_len = input_ids.shape[1]
             for i in range(1, tok_len + 1):
-                self.forward_toks(input_ids[:, i-1:i])
                 self.forward_toks(input_ids[:, :i])
 
     def get_normed_states(self, output):
@@ -69,7 +68,8 @@ class Visualizer:
 
     def encode(self):
         print('embedding', self.states[-1][0].shape)
-        self.embeddings = [self.autoencoder(hs.float().to(self.device), layer_idx=layer)[0][0] for layer, hs in enumerate(self.states[-1])]
+        n_layers = len(self.states[0])
+        self.embeddings = [self.autoencoder(state[n_layers // 2].float().to(self.device), layer_idx=n_layers // 2)[0][0] for state in self.states]
 
     def logits(self, state):
         state = state.unsqueeze(0)
@@ -99,7 +99,7 @@ class Visualizer:
     def visualize(self):
         r = np.percentile(np.linalg.norm(self.embeddings[0].reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
         points = [(10 * p / r).tolist() for p in self.embeddings]
-        tops = [self.top_tokens(self.states[-1][i]) for i in range(len(self.embeddings))]
+        tops = [self.top_tokens(state[-1]) for state in self.states]
         neighbors = self.find_nearest_neighbors(self.embeddings)
         centroids = [layer.mean(dim=0).tolist() for layer in self.embeddings]
 
