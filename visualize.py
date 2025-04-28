@@ -97,7 +97,8 @@ class Visualizer:
         return nn
 
     def visualize(self):
-        points = [p.tolist() for p in self.embeddings]
+        r = np.percentile(np.linalg.norm(self.embeddings[0].reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
+        points = [(10 * p / r).tolist() for p in self.embeddings]
         tops = [self.top_tokens(self.states[-1][i]) for i in range(len(self.embeddings))]
         neighbors = self.find_nearest_neighbors(self.embeddings)
         centroids = [layer.mean(dim=0).tolist() for layer in self.embeddings]
@@ -146,7 +147,7 @@ class Visualizer:
 
 if __name__ == '__main__':
     prompts = [
-        "If personality is an unbroken series of successful gestures, then there was something gorgeous about him, some heightened sensitivity to the promises of life, as if he were related to one of those intricate machines that register earthquakes ten thousand"
+        "If personality is an unbroken series of successful gestures, then there was something gorgeous about"
     ]
     visualizer = Visualizer(prompts)
     visualizer.run()

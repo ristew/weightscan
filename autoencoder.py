@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from metrics_reporter import MetricsReporter
 
 __all__ = ["Autoencoder"]
 
@@ -13,21 +14,27 @@ class Autoencoder(nn.Module):
 
     def __init__(self,
                  input_dim: int,
-                 n_components: int = 256,   # C
+                 n_components: int = 2048,   # C
                  hidden_dim: int = 1536,
                  n_layers: int = 32,
-                 top_k: int = 4,
+                 top_k: int = 8,
+                 top_octants: int = 7,
                  lr: float = 3e-4,
                  num_epochs: int = 5,
-                 beta_min: float = 1.0,
-                 alpha_simp: float = 5e-3):
+                 beta_min: float = 1e8,
+                 alpha_simp: float = 2,
+                 r_min: float = 1e-4,
+                 faithful_alpha: float = 4):
         super().__init__()
         self.input_dim   = input_dim
         self.n_components = n_components
         self.top_k       = top_k
+        self.top_octants = top_octants
         self.num_epochs  = num_epochs
         self.beta_min    = beta_min   # weight on minimality loss
         self.alpha_simp  = alpha_simp # weight on simplicity loss
+        self.faithful_alpha = faithful_alpha
+        self.r_min = r_min
 
         # === modules ======================================================
         self.pool = nn.AdaptiveAvgPool1d(1)
@@ -56,19 +63,34 @@ class Autoencoder(nn.Module):
         """Straight‑through binary mask selecting *top_k* components per batch row."""
         vals, idx = torch.topk(scores, self.top_k, dim=-1)
         mask = torch.zeros_like(scores, dtype=torch.bool)
-        mask.scatter_(1, idx, True)
+        mask.scatter_(-1, idx, True)
         return mask
 
-    # ------------------------------------------------------------------
-    # forward
-    def _dense_mix(self, logits):
-        weights = logits.softmax(dim=-1)            # (B,C)
-        return weights @ self.components            # (B,3)
+    def _octant_topk_mask(self, logits: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            c_sign = (self.components > 0).to(torch.int) # (C, 3)
+            oct_id = (c_sign[:, 0] << 2) | (c_sign[:, 1] << 1) | c_sign[:, 2] # (C,)
 
-    def _sparse_mix(self, logits, mask):
-        logits_masked = logits.masked_fill(~mask, float('-inf'))
-        weights = logits_masked.softmax(dim=-1)     # (B,C)
-        return weights @ self.components            # (B,3)
+        probs = logits.softmax(dim=-1)
+        mass8 = probs @ F.one_hot(oct_id.long(), 8).float()
+        _, best = mass8.topk(self.top_octants, dim=-1)
+        keep = (oct_id.unsqueeze(0) == best.unsqueeze(-1)).any(dim=1)
+        return keep
+
+
+    # ------------------------------------------------------------------
+    # radial projection
+    def _radial_clip(self, pts: torch.Tensor) -> torch.Tensor:
+        """
+        pts: (B,C,3) batch of weighted component vectors.
+        Any point whose length > r_min is projected onto the unit sphere
+        (length = 1); the rest are zeroed.  All ops are differentiable.
+        """
+        norms = pts.norm(dim=-1, keepdim=True)                       # (B,C,1)
+        keep  = norms > self.r_min
+        # normalise only the ones we keep; avoid /0 with clamp
+        proj  = pts / norms.clamp_min(1e-6)
+        return torch.where(keep, proj, torch.zeros_like(pts))
 
     def forward(self, x: torch.Tensor, layer_idx: int):
         """Return ``encoded, decoded, pooled`` to match original API.
@@ -77,64 +99,40 @@ class Autoencoder(nn.Module):
         * pooled   –  original pooled activations.
         """
         x = x.float()
-        # pooled = self.pool(x.transpose(1,2)).squeeze(-1)        # (B,input_dim)
-        x = x + self.layer_embed(torch.tensor(layer_idx, device=x.device))
-        logits = self.encoder(x)                           # (B,C)
+        pooled = self.pool(x.transpose(1,2)).squeeze(-1)        # (B,input_dim)
+        # pooled = pooled + self.layer_embed(torch.tensor(layer_idx, device=x.device))
+        logits = self.encoder(pooled)                           # (B,C)
 
-        # -----   sparse mix   -------------------------------------------
-        mask   = self._batch_topk_mask(logits)
-        points_sparse = self._sparse_mix(logits, mask)          # (B,3)
+        # oct_mask = self._octant_topk_mask(logits)
+        # logits = logits.masked_fill(~oct_mask, float('-inf'))
+        #
+        weights = logits.softmax(dim=-1)                 # (B,C)
+        raw_pts = weights.unsqueeze(-1) * self.components        # (B,C,3)
+        proj_pts = self._radial_clip(raw_pts)                    # (B,C,3)
+        points_sparse = proj_pts.sum(dim=1)                      # (B,3)
         decoded = self.decoder(points_sparse)                   # (B,input_dim)
 
-        # encoded: expose every component as a point for caller visualisation
-        # Shape: (B,C,3)
-        encoded = self.components.unsqueeze(0).expand(x.size(0), -1, -1)
-        return encoded, decoded
+        encoded = proj_pts                                       # (B,C,3)
+        return encoded, decoded, pooled
 
-    # ------------------------------------------------------------------
-    # losses (APD‑inspired)
     def _loss(self, batch, layer_idx):
-        encoded, decoded_sparse = self.forward(batch, layer_idx)
-
-        # Dense reconstruction for faithfulness/minimality reference
-        logits = self.encoder(batch)               # (B,C)
-        points_dense = self._dense_mix(logits)      # (B,3)
-        decoded_dense = self.decoder(points_dense)  # (B,input_dim)
-
-        # 1) faithfulness (to pooled activations)
-        L_f = F.mse_loss(decoded_dense, batch)
-        # 2) minimality (sparse ≈ dense)
-        L_min = F.mse_loss(decoded_sparse, decoded_dense)
-        # 3) simplicity (Schatten‑½ on active components)
-        mask = self._batch_topk_mask(logits).any(dim=0)         # (C,)
-        active = self.components[mask]                          # (A,3)
-        if active.numel() == 0:
-            L_simp = torch.tensor(0., device=batch.device)
-        else:
-            L_simp = (active.norm(dim=1) ** 0.5).sum()
-
-        loss = L_f + self.beta_min * L_min + self.alpha_simp * L_simp
+        encoded, decoded_sparse, pooled = self.forward(batch, layer_idx)
+        L_f = self.faithful_alpha * F.mse_loss(decoded_sparse, pooled)
+        loss = L_f # + L_simp + L_min + L_origin
+        self.reporter.update(loss=loss)
         return loss
 
-    # ------------------------------------------------------------------
-    # public train API (minimal drop‑in for train.py)
-    def train_set(self, training_set):
+    def train_set(self, training_set, layers):
+        self.reporter = MetricsReporter()
         self.train()
-        et = 0
         for epoch in range(self.num_epochs):
-            et += 1
-            st = 0
-            for sample in training_set:      # sample is a *list* of tensors
-                st += 1
-                sl = 0
-                lt = 0
-                for layer_t in sample:
+            for sample in training_set:
+                for layer_idx in layers:
+                    layer_t = sample[layer_idx]
                     self.opt.zero_grad()
-                    loss = self._loss(layer_t, lt)
+                    loss = self._loss(layer_t, layer_idx)
                     loss.backward()
                     self.opt.step()
-                    sl += loss.item()
-                    lt += 1
-                print(f"loss@{et}:{st}={sl}")
+            self.reporter.epoch_end(epoch)
         self.eval()
-        print()
+        print(self.components)
