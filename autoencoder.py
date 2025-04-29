@@ -17,7 +17,7 @@ class Autoencoder(nn.Module):
                  n_components: int = 4096,   # C
                  hidden_dim: int = 1536,
                  n_layers: int = 32,
-                 top_k: int = 100,
+                 top_k: int = 64,
                  top_octants: int = 7,
                  lr: float = 3e-4,
                  num_epochs: int = 5,
@@ -119,4 +119,3 @@ class Autoencoder(nn.Module):
                 self.opt.step()
             self.reporter.epoch_end(epoch)
         self.eval()
-        print(self.components)

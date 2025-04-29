@@ -70,8 +70,8 @@ class Trainer:
             input_dim=input_dim,
             n_layers=n_layers,
             # compressed_dim=(768, 3),
-            lr=3e-5,
-            num_epochs=10,
+            lr=4e-5,
+            num_epochs=20,
         ).to(self.device)
         random.shuffle(self.states)
         self.autoencoder.train_set(self.states, layer_idx=n_layers // 2)
