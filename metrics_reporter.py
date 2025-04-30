@@ -10,12 +10,16 @@ class MetricsReporter:
         self.last = 0
 
     def update(self, **kv):
+        print("\r", end="")
+        ut = time.time()
+        show = False
+        if ut - self.last > 0.1:
+            self.last = ut
+            show = True
         for k, v in kv.items():
             self._running[k].append(float(v))
-            ut = time.time()
-            if ut - self.last > 0.1:
-                print(f"\r{k}={v:.4f}    ", end="")
-                self.last = ut
+            if show:
+                print(f"{k}={v:.4f} ", end="")
 
     def epoch_end(self, epoch: int):
         avg = {k: sum(v) / len(v) for k, v in self._running.items()}

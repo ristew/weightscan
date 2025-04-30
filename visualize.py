@@ -10,6 +10,26 @@ from autoencoder import Autoencoder
 from sklearn.neighbors import NearestNeighbors
 import os
 
+
+class Frame:
+    def __init__(self, points, prompt, layer_idx, tops, neighbors):
+        self.points = points
+        self.prompt = prompt
+        self.layer_idx = layer_idx
+        self.tops = tops
+        self.neighbors = neighbors
+
+    def tojson(self):
+        return {
+            'points': self.points.tolist(),
+            'prompt': self.prompt,
+            'layer_idx': self.layer_idx,
+            'tops': self.tops,
+            'neighbors': self.neighbors
+        }
+
+
+
 class Visualizer:
     def __init__(self, prompts, model_name='unsloth/Llama-3.2-1B'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -22,6 +42,7 @@ class Visualizer:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
         self.top_k = 5
         self.prompts = prompts
+        self.frames = []
         self.states = []
 
     def norm(self, state):
@@ -37,7 +58,8 @@ class Visualizer:
     def forward_toks(self, toks):
         output = self.model.forward(toks, output_hidden_states=True)
         states = self.get_normed_states(output)
-        self.states.append(states)
+        print(toks, self.tokenizer.decode(toks[0, :]))
+        self.states.append((states, self.tokenizer.decode(toks[0, :])))
 
     def forward(self):
         for prompt in self.prompts:
@@ -55,8 +77,8 @@ class Visualizer:
         return normed_states
 
     def load_autoencoder(self, filename='weights/checkpoint.pth'):
-        input_dim = self.states[0][0][0][0].size()[0]
-        n_layers = len(self.states[0])
+        input_dim = self.states[0][0][0][0][0].size()[0]
+        n_layers = len(self.states[0][0])
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
             n_layers=n_layers,
@@ -67,9 +89,20 @@ class Visualizer:
         print(f"Autoencoder weights loaded from {filename}")
 
     def encode(self):
-        print('embedding', self.states[-1][0].shape)
-        n_layers = len(self.states[0])
-        self.embeddings = [self.autoencoder(state[n_layers // 2].float().to(self.device), layer_idx=n_layers // 2)[0][0] for state in self.states]
+        print('embedding', self.states[0][0][-1][0].shape)
+        n_layers = len(self.states[0][0])
+        self.embeddings = []
+        for idx, (state, prompt) in enumerate(self.states):
+            for layer_idx in range(1, n_layers - 1):
+                points = self.autoencoder(state[layer_idx].float().to(self.device))[0][0]
+                # r = np.percentile(np.linalg.norm(encoded.reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
+                # points = 10 * encoded / r
+                tops = self.top_tokens(state[layer_idx])
+                neighbors = self.find_nearest_neighbors(points)
+                # r = np.percentile(np.linalg.norm(points.reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
+                # points = (points / r).tolist()
+                frame = Frame(points, prompt, layer_idx, tops, neighbors)
+                self.frames.append(frame)
 
     def logits(self, state):
         state = state.unsqueeze(0)
@@ -86,29 +119,17 @@ class Visualizer:
         top_probs, top_indices = torch.topk(self.logprobs(state)[0, -1, :], self.top_k)
         return [(self.tokenizer.decode([idx]), top_probs[j].item()) for j, idx in enumerate(top_indices)]
 
-    def find_nearest_neighbors(self, embeddings, n_neighbors=4):
-        nn = []
-        for layer in embeddings:
-            layer = layer.cpu().detach().numpy()
-            neighbors = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
-            neighbors.fit(layer)
-            distances, indices = neighbors.kneighbors(layer)
-            nn.append([list(zip(indices[i].tolist(), distances[i].tolist()))[1:] for i in range(len(distances))])
-        return nn
+    def find_nearest_neighbors(self, points, n_neighbors=4):
+        points = points.cpu().detach().numpy()
+        neighbors = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
+        neighbors.fit(points)
+        distances, indices = neighbors.kneighbors(points)
+        return [list(zip(indices[i].tolist(), distances[i].tolist()))[1:] for i in range(len(distances))]
 
     def visualize(self):
-        r = np.percentile(np.linalg.norm(self.embeddings[0].reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
-        points = [(10 * p / r).tolist() for p in self.embeddings]
-        tops = [self.top_tokens(state[-1]) for state in self.states]
-        neighbors = self.find_nearest_neighbors(self.embeddings)
-        centroids = [layer.mean(dim=0).tolist() for layer in self.embeddings]
-
         data = json.dumps({
-            'points': points,
-            'tops': tops,
-            'prompt': self.prompts[-1],
-            'neighbors': neighbors,
-            'centroids': centroids,
+            'frames': [frame.tojson() for frame in self.frames],
+            'n_layers': len(self.states[0][0])
         })
         with open('visualize_template.html', 'r') as template_file:
             template = template_file.read()

@@ -64,17 +64,14 @@ class Trainer:
         torch.cuda.empty_cache()
         input_dim = self.states[0][0][0][0].size()[0]
         n_layers = len(self.states[0])
-        lb = n_layers // 2 - 2
-        print('layers', n_layers, lb)
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
             n_layers=n_layers,
-            # compressed_dim=(768, 3),
-            lr=4e-5,
-            num_epochs=20,
+            lr=3e-5,
+            num_epochs=10,
         ).to(self.device)
-        random.shuffle(self.states)
-        self.autoencoder.train_set(self.states, layer_idx=n_layers // 2)
+        # random.shuffle(self.states)
+        self.autoencoder.train_set(self.states)
         self.save_weights()
 
     def save_weights(self, filename='weights/checkpoint.pth'):

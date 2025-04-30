@@ -1,277 +1,148 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>weightscan</title>
-    <meta name="description" content="">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-      body { margin: 0; }
-      canvas { display: block; }
-      .info {
-        position: absolute;
-        color: white;
-        background-color: rgba(0, 0, 0, 0.5);
+<head>
+  <meta charset="utf-8">
+  <title>weightscan</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body{margin:0}              canvas{display:block}
+    .info{position:absolute;color:#fff;background:rgba(0,0,0,.45);pointer-events:none}
+    #tops-info{top:1.5em}
+    #prompt-info{top:3em}
+    #frame-info{top:4.5em}
+    #progress{position:absolute;bottom:0;left:0;width:100%;height:6px;background:rgba(255,255,255,.12)}
+    #bar{width:0;height:100%;background:#ff8800}
+  </style>
+  <script type="importmap">
+  {
+    "imports":{
+      "three":"https://unpkg.com/three@0.162.0/build/three.module.js",
+      "three/addons/":"https://unpkg.com/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+    const DATA    = $$DATA$$;
+    const FRAMES  = DATA.frames;
+
+    /* slice once, reuse forever */
+    const POINTS     = FRAMES.map(f=>f.points);
+    const NEIGHBORS  = FRAMES.map(f=>f.neighbors);
+    const TOPS       = FRAMES.map(f=>f.tops);
+    const PROMPTS    = FRAMES.map(f=>f.prompt);
+    const N_FRAMES   = FRAMES.length;
+    const TOP_K      = POINTS[0].length;
+    const NBR_PER_PT = NEIGHBORS[0][0].length;
+
+    /* camera + scene */
+    const scene = new THREE.Scene();
+    scene.fog   = new THREE.FogExp2(0x000000,1e-3);
+    const camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,1e3);
+    camera.position.set(-10,-10,-10);
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(innerWidth,innerHeight); document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera,renderer.domElement);
+    controls.target.set(...centroid(POINTS[0])); controls.update();
+
+    /* neighbour lines – allocate once, reuse */
+    const LINES=[];
+    for(let p=0;p<TOP_K;++p){
+      for(let n=0;n<NBR_PER_PT;++n){
+        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+        const mat = new THREE.LineBasicMaterial();
+        const line = new THREE.Line(geo,mat); scene.add(line); LINES.push(line);
       }
-      #tops-info {
-        top: 1.5em;
-      }
-      #prompt-info {
-        top: 3em;
-      }
-    </style>
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
-          "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
-        }
-      }
-    </script>
-    <script type="module">
-      import * as THREE from 'three';
-      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-      const DATA = $$DATA$$;
-      const POINTS = DATA.points;
-      const TOPS = DATA.tops;
-      const PROMPT = DATA.prompt;
-      const NEIGHBORS = DATA.neighbors;
-      const CENTROIDS = DATA.centroids;
-      const META = [];
-      console.log('neighbors', DATA);
-      document.getElementById('prompt-info').textContent = 'prompt: ' + PROMPT;
+    }
 
-      const scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0x000000, 0.001);
-      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-      const renderer = new THREE.WebGLRenderer();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      document.addEventListener('DOMContentLoaded', function() {
-        document.body.appendChild(renderer.domElement);
-      });
-      const controls = new OrbitControls(camera, renderer.domElement);
-      camera.position.set(-10, -10, -10);
-      camera.lookAt(new THREE.Vector3(0, 0, 0));
-      function calculateCenter(frame) {
-        const sum = frame.reduce((acc, val) => {
-          acc[0] += val[0];
-          acc[1] += val[1];
-          acc[2] += val[2];
-          return acc;
-        }, [0, 0, 0]);
-        return sum.map(s => s / frame.length);
-      }
-      const center = calculateCenter(POINTS[0]);
-      console.log('center', center);
-      controls.target.set(...center);
-      // controls.autoRotate = true;
-      controls.update();
-      let currentFrameIndex = 0;
-      let lastSwitchTime = performance.now();
-      const frameDuration = 180;
-      let running = true;
-      let step = 0;
+    /* ── compute META once per frame ───────────────────────────────────────────── */
+    const META = FRAMES.map(f=>{
+      const c = centroid(f.points);
+      let maxDist = 0, maxC = 0;
 
-      const layers = [];
-
-      function calculateDistance(p1, p2) {
-        return Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2);
-      }
-
-      function add(p1, p2) {
-        return [p1[0] + p2[0], p1[1] + p2[1], p1[2] + p2[2]];
-      }
-
-      function sub(p1, p2) {
-        return [p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]];
-      }
-
-      function mulConst(p1, q) {
-        return [p1[0] * q, p1[1] * q, p1[2] * q];
-      }
-
-      function divConst(p1, q) {
-        return [p1[0] / q, p1[1] / q, p1[2] / q];
-      }
-
-
-      function neighborLine(frameIdx, pointIdx, neighborPairIdx) {
-        const frame = POINTS[frameIdx];
-        const neighbors = NEIGHBORS[frameIdx];
-        const { maxDist, maxCenterDist } = META[frameIdx];
-        const neighborPair = neighbors[pointIdx][neighborPairIdx];
-        const neighborIdx = neighborPair[0];
-        const neighborDist = neighborPair[1];
-        const neighborWeight = Math.pow(1 - neighborDist / maxDist, 2);
-        const point = frame[pointIdx];
-        const neighborPointRaw = frame[neighborIdx];
-
-        const direction = sub(neighborPointRaw, point);
-
-        const magnitude = Math.sqrt(direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2);
-        const unitVector = divConst(direction, magnitude);
-
-        const neighborPoint = add(point, mulConst(unitVector, 0.07));
-
-        const centerDist = calculateDistance(point, center);
-        const centerWeight = Math.pow(1 - (centerDist / maxCenterDist), 2);
-        const color = new THREE.Color(neighborWeight, centerWeight * 0.3, 0.2 - 0.2 * neighborWeight);
-        return {
-          color,
-          point,
-          neighborPoint,
-        };
-      }
-      const EDGES = {};
-      const LINES = [];
-
-      function frameObjects(frameIdx) {
-        const objects = [];
-        const frame = POINTS[frameIdx];
-        const neighbors = NEIGHBORS[frameIdx];
-        EDGES[frameIdx] = [];
-        META[frameIdx] = {};
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(frame.flat());
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const material = new THREE.PointsMaterial({
-          color: 0xDDDDDD,
-          size: 0.5,
-          sizeAttenuation: true,
-          transparent: true,
-          opacity: 0.8
-        });
-        const points = new THREE.Points(geometry, material);
-        let maxDist = 0;
-        for (const point of neighbors) { // just use second layer
-          for (const neighborPair of point) {
-            if (neighborPair[1] > maxDist) {
-              maxDist = neighborPair[1];
-            }
-          }
-        }
-        META[frameIdx].maxDist = maxDist;
-
-
-        const maxCenterDist = Math.max(...frame.map(p => calculateDistance(p, center)));
-        META[frameIdx].maxCenterDist = maxCenterDist;
-
-        let lineIdx = 0;
-        for (const pointIdx in frame) {
-          for (const neighborPairIdx in neighbors[pointIdx]) {
-            const { color, point, neighborPoint } = neighborLine(frameIdx, pointIdx, neighborPairIdx);
-            const edge = {
-              lineIdx,
-              pointIdx,
-              neighborPairIdx,
-            };
-            EDGES[frameIdx].push(edge);
-            lineIdx++;
-          }
-        }
-        return objects;
-      }
-      for (const idx in POINTS) {
-        layers.push(frameObjects(idx));
-      }
-
-      for (const pointIdx in POINTS[0]) {
-        for (const neighborPairIdx in NEIGHBORS[0][pointIdx]) {
-          const { color, point, neighborPoint } = neighborLine(0, pointIdx, neighborPairIdx);
-          const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(...point),
-            new THREE.Vector3(...neighborPoint)
-          ]);
-
-          const material = new THREE.LineBasicMaterial({ color });
-          const line = new THREE.Line(lineGeometry, material);
-          LINES.push({ line, material });
-          scene.add(line);
+      // fix: iterate over each point’s neighbor list, then over its pairs
+      for (const nbrList of f.neighbors){
+        for (const [, d] of nbrList){
+          if (d > maxDist) maxDist = d;
         }
       }
 
-      function addCentroidTrail() {
-        const trailGeom = new THREE.BufferGeometry();
-        const verts = new Float32Array(CENTROIDS.flat());
-        trailGeom.setAttribute('position', new THREE.BufferAttribute(verts,3));
-        const mat = new THREE.LineBasicMaterial({color:0xff8800});
-        const line = new THREE.Line(trailGeom, mat);
-        scene.add(line);
-
-        const sphereGeom = new THREE.SphereGeometry(0.6, 16, 16);
-        const sphereMat  = new THREE.MeshBasicMaterial({color:0xffff00});
-        CENTROIDS.forEach((c,i)=>{
-          const m = new THREE.Mesh(sphereGeom, sphereMat.clone());
-          m.position.set(...c);
-          m.material.color.offsetHSL(i/CENTROIDS.length,0,0);   // rainbow by layer
-          scene.add(m);
-        });
+      for (const p of f.points){
+        const d = dist(p, c);
+        if (d > maxC) maxC = d;
       }
-      // addCentroidTrail();
+      return { c, maxDist, maxC };
+    });
 
-      // Modify animate function to include logic for adding lines
-      function animate() {
-        requestAnimationFrame(animate);
+    /* helpers */
+    function centroid(arr){const s=[0,0,0];for(const p of arr){s[0]+=p[0];s[1]+=p[1];s[2]+=p[2]}return s.map(v=>v/arr.length)}
+    function dist(a,b){return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2])}
+    function interp(p,q,t){return [p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t,p[2]+(q[2]-p[2])*t]}
 
-        const now = performance.now();
-        if (running && now - lastSwitchTime > frameDuration) {
-          lastSwitchTime = now;
+    /* UI elements */
+    document.body.insertAdjacentHTML('beforeend',`
+      <div id="frame-info" class="info"></div>
+      <div id="tops-info" class="info"></div>
+      <div id="prompt-info" class="info"></div>
+      <div id="progress"><div id="bar"></div></div>
+    `);
+    const frameInfo = document.getElementById('frame-info');
+    const topsInfo  = document.getElementById('tops-info');
+    const promptInfo= document.getElementById('prompt-info');
+    const bar       = document.getElementById('bar');
 
-          for (const edge of EDGES[currentFrameIndex]) {
-            const { color, point, neighborPoint } = neighborLine(currentFrameIndex, edge.pointIdx, edge.neighborPairIdx);
-            // console.log('update edge', edge, color, point, neighborPoint);
-            const { line, material } = LINES[edge.lineIdx];
-            line.geometry.attributes.position.setXYZ(0, ...point);
-            line.geometry.attributes.position.setXYZ(1, ...neighborPoint);
-            line.geometry.attributes.position.needsUpdate = true;
-            material.color.set(color);
-          }
+    /* main loop */
+    let frame=0,last=performance.now(),running=true,step=0;
+    const FRAME_MS=60;
 
-          document.getElementById('frame-info').textContent = `frame ${currentFrameIndex}`;
-          document.getElementById('tops-info').textContent = TOPS[currentFrameIndex].map(top => {
-            return `'${top[0]}' = ${top[1].toFixed(3)}\n`;
-          });
-
-          currentFrameIndex = (currentFrameIndex + 1) % POINTS.length;
-          if (step > 0) {
-            step = step - 1;
-            if (step <= 0) {
-              running = false;
-            }
-          } else if (currentFrameIndex === 0) {
-            running = false;
-            setTimeout(() => { running = true; }, frameDuration * 4);
-          }
+    function draw(f){
+      /* points – bulk copy */
+      const pts = POINTS[f];
+      const {maxDist,maxC,c} = META[f];
+      let l=0;
+      for(let p=0;p<TOP_K;++p){
+        const base=pts[p];
+        for(const [nbrIdx,nbrDist] of NEIGHBORS[f][p]){
+          const w = (1-nbrDist/maxDist)**2;
+          const cw= (1-dist(base,c)/maxC)**2;
+          const tgt=interp(base,pts[nbrIdx],.02/dist(base,pts[nbrIdx]));
+          const line=LINES[l++];
+          line.geometry.attributes.position.setXYZ(0,...base);
+          line.geometry.attributes.position.setXYZ(1,...tgt);
+          line.geometry.attributes.position.needsUpdate=true;
+          line.material.color.setRGB(w,cw*.3,.2-.2*w);
         }
-        controls.target.set(...center);
-        controls.update();
-        renderer.render(scene, camera);
       }
 
-      document.addEventListener('keydown', function (e) {
-        if (e.key === ' ') {
-          running = !running;
-        }
-        if (e.key === '[') {
-          currentFrameIndex = currentFrameIndex - 2;
-          if (currentFrameIndex < 0) {
-            currentFrameIndex = POINTS.length + currentFrameIndex;
-          }
-          step = 1;
-          running = true;
-        }
-        if (e.key === ']') {
-          step = 1;
-          running = true;
-        }
-      });
+      /* HUD */
+      frameInfo.textContent=`frame ${f}/${N_FRAMES-1} layer ${FRAMES[f].layer_idx + 1}/${DATA.n_layers}`;
+      topsInfo.textContent=TOPS[f].map(([tok,p])=>`'${tok.trim()}' ${p.toFixed(3)}`).join('\n');
+      promptInfo.textContent=`prompt: ${PROMPTS[f]}`;
+      bar.style.width=`${(FRAMES[f].layer_idx+1)/DATA.n_layers*100}%`;
+    }
 
-      animate();
-    </script>
-  </head>
-  <body>
-    <div id="frame-info" class="info"></div>
-    <div id="tops-info" class="info"></div>
-    <div id="prompt-info" class="info"></div>
-  </body>
+    function animate(){
+      requestAnimationFrame(animate);
+      const now=performance.now();
+      if(running && now-last>FRAME_MS){
+        last=now; draw(frame); frame=(frame+1)%N_FRAMES;
+        if(step>0 &&!--step)running=false;
+        if(frame===0 && step===0){running=false;setTimeout(()=>running=true,FRAME_MS*4)}
+      }
+      renderer.render(scene,camera); controls.update();
+    }
+
+    window.addEventListener('keydown',e=>{
+      if(e.key===' '){running=!running}
+      if(e.key==='['){frame=(frame-2+N_FRAMES)%N_FRAMES;step=1;running=true}
+      if(e.key===']'){step=1;running=true}
+    });
+
+    draw(0); animate();
+  </script>
+</head>
+<body></body>
 </html>
