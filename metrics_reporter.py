@@ -11,18 +11,16 @@ class MetricsReporter:
         self.t = 0
 
     def update(self, **kv):
-        print(f"\r{self.t}: ", end="")
-        self.t += 1
         ut = time.time()
-        show = False
+        self.t += 1
         if ut - self.last > 0.1:
             self.last = ut
-            show = True
-        for k, v in kv.items():
-            self._running[k].append(float(v))
-            if show:
-                print(f"{k}={v:.4f} ", end="")
-        print("    ", end="")
+            line = f"\r{self.t}: "
+            for k, v in kv.items():
+                self._running[k].append(float(v))
+                line += f"{k}={v:.4f} "
+            line += "    "
+            print(line, end="")
 
     def epoch_end(self, epoch: int):
         avg = {k: sum(v) / len(v) for k, v in self._running.items()}
@@ -30,8 +28,9 @@ class MetricsReporter:
             self.history[k].append(v)
         self._running.clear()
         self._render(epoch, avg)
+        self.t = 0
         return avg
 
     def _render(self, epoch: int, avg: dict):
-        print(f"\repoch {epoch+1} :: " +
-              "  ".join(f"{k}={v:.8f}" for k, v in avg.items()))
+        print(f"\repoch={epoch} t={self.t} " +
+              "  ".join(f"{k}={v:.4f}" for k, v in avg.items()))

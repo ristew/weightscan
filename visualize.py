@@ -58,7 +58,7 @@ class Visualizer:
     def forward_toks(self, toks):
         output = self.model.forward(toks, output_hidden_states=True)
         states = self.get_normed_states(output)
-        print(toks, self.tokenizer.decode(toks[0, :]))
+        # print(toks, self.tokenizer.decode(toks[0, :]))
         self.states.append((states, self.tokenizer.decode(toks[0, :])))
 
     def forward(self):
@@ -81,8 +81,6 @@ class Visualizer:
         n_layers = len(self.states[0][0])
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            n_layers=n_layers,
-            # compressed_dim=(768, 3),
         ).to(self.device)
         self.autoencoder.load_state_dict(torch.load(filename))
         self.autoencoder.eval()
@@ -91,18 +89,15 @@ class Visualizer:
     def encode(self):
         print('embedding', self.states[0][0][-1][0].shape)
         n_layers = len(self.states[0][0])
+        target_layer = n_layers // 2
         self.embeddings = []
-        for idx, (state, prompt) in enumerate(self.states):
-            for layer_idx in range(0, n_layers):
-                points = self.autoencoder(state[layer_idx].float().to(self.device))[0][0]
-                # r = np.percentile(np.linalg.norm(encoded.reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
-                # points = 10 * encoded / r
-                tops = self.top_tokens(state[layer_idx])
-                neighbors = self.find_nearest_neighbors(points)
-                # r = np.percentile(np.linalg.norm(points.reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
-                # points = (points / r).tolist()
-                frame = Frame(points, prompt, layer_idx, tops, neighbors)
-                self.frames.append(frame)
+        for (state, prompt) in self.states:
+            layer = state[target_layer]
+            points = self.autoencoder(layer.float().to(self.device))[0][0]
+            tops = self.top_tokens(layer)
+            neighbors = self.find_nearest_neighbors(points)
+            frame = Frame(points, prompt, target_layer, tops, neighbors)
+            self.frames.append(frame)
 
     def logits(self, state):
         state = state.unsqueeze(0)
@@ -168,7 +163,7 @@ class Visualizer:
 
 if __name__ == '__main__':
     prompts = [
-        "If personality is an unbroken series of successful gestures, then there was something gorgeous about"
-    ]
+        "If personality is an unbroken series of successful gestures, then there was something gorgeous about him, some heightened sensitivity to the promises of life"         
+        ]
     visualizer = Visualizer(prompts)
     visualizer.run()

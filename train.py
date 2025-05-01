@@ -64,13 +64,11 @@ class Trainer:
         torch.cuda.empty_cache()
         input_dim = self.states[0][0][0][0].size()[0]
         n_layers = len(self.states[0])
+        target_layer = n_layers // 2
         self.autoencoder = Autoencoder(
             input_dim=input_dim,
-            n_layers=n_layers,
-            lr=3e-5,
-            num_epochs=3,
         ).to(self.device)
-        # random.shuffle(self.states)
+        random.shuffle(self.states)
         self.autoencoder.train_set(self.states)
         self.save_weights()
 
