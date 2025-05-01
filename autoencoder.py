@@ -7,13 +7,13 @@ from metrics_reporter import MetricsReporter
 class Autoencoder(nn.Module):
     def __init__(self,
                  input_dim: int,
-                 n_components: int = 8192,   # C
-                 hidden_dim: int = 4096,
+                 n_components: int = 32768,   # C
+                 hidden_dim: int = 768,
                  n_layers: int = 32,
                  top_k: int = 256,
                  lr: float = 3e-4,
                  num_epochs: int = 5,
-                 origin_alpha: float = 10,
+                 origin_alpha: float = 1e-1,
                  faithful_alpha: float = 1):
         super().__init__()
         self.input_dim   = input_dim
@@ -53,17 +53,18 @@ class Autoencoder(nn.Module):
         _, idx = torch.topk(logits, self.top_k, dim=-1) # (B,top_k)
         batch_ix = torch.arange(x.size(0), device=x.device).unsqueeze(-1)
         points = points[batch_ix, idx]
+        points = F.normalize(points, dim=-1)
         decoded = self.decoder(points).sum(dim=1)
         return points, decoded, pooled
 
     def _loss(self, batch):
         encoded, decoded, pooled = self.forward(batch)
         L_f = self.faithful_alpha * F.mse_loss(decoded, pooled)
-        md = encoded.norm(dim=-1).mean(dim=-1).squeeze()
-        mr = (1.0 - md)**2
-        L_origin = self.origin_alpha * mr
-        loss = L_f + L_origin
-        self.reporter.update(loss=loss, f=L_f, o=L_origin)
+        # md = (1.0 - encoded.norm(dim=-1)).pow(2).sum(dim=-1).squeeze()
+        # L_origin = self.origin_alpha * md
+        #
+        loss = L_f# + L_origin
+        self.reporter.update(loss=loss, f=L_f)
         return loss
 
     def train_set(self, training_set):
@@ -71,7 +72,7 @@ class Autoencoder(nn.Module):
         self.train()
         for epoch in range(self.num_epochs):
             for sample in training_set:
-                for layer_idx in range(1, len(sample) - 1):
+                for layer_idx in range(0, len(sample)):
                     layer_t = sample[layer_idx]
                     self.opt.zero_grad()
                     loss = self._loss(layer_t)

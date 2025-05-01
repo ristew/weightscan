@@ -93,7 +93,7 @@ class Visualizer:
         n_layers = len(self.states[0][0])
         self.embeddings = []
         for idx, (state, prompt) in enumerate(self.states):
-            for layer_idx in range(1, n_layers - 1):
+            for layer_idx in range(0, n_layers):
                 points = self.autoencoder(state[layer_idx].float().to(self.device))[0][0]
                 # r = np.percentile(np.linalg.norm(encoded.reshape(-1, 3).cpu().detach().numpy(), axis=1), 95) + 1e-9
                 # points = 10 * encoded / r

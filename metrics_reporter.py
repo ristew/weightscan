@@ -8,9 +8,11 @@ class MetricsReporter:
         self._running = defaultdict(list)    # metrics this epoch
         self.history  = defaultdict(list)    # full-run record
         self.last = 0
+        self.t = 0
 
     def update(self, **kv):
-        print("\r", end="")
+        print(f"\r{self.t}: ", end="")
+        self.t += 1
         ut = time.time()
         show = False
         if ut - self.last > 0.1:
@@ -20,6 +22,7 @@ class MetricsReporter:
             self._running[k].append(float(v))
             if show:
                 print(f"{k}={v:.4f} ", end="")
+        print("    ", end="")
 
     def epoch_end(self, epoch: int):
         avg = {k: sum(v) / len(v) for k, v in self._running.items()}
