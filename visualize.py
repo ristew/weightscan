@@ -93,7 +93,7 @@ class Visualizer:
         self.embeddings = []
         for (state, prompt) in self.states:
             layer = state[target_layer]
-            points = self.autoencoder(layer.float().to(self.device))[0][0]
+            points = self.autoencoder(layer.float().to(self.device))[1][0]
             tops = self.top_tokens(layer)
             neighbors = self.find_nearest_neighbors(points)
             frame = Frame(points, prompt, target_layer, tops, neighbors)
@@ -163,7 +163,7 @@ class Visualizer:
 
 if __name__ == '__main__':
     prompts = [
-        "If personality is an unbroken series of successful gestures, then there was something gorgeous about him, some heightened sensitivity to the promises of life"         
+        "Those were the days - Monday Tuesday Wednesday Thursday Friday Saturday Sunday"         
         ]
     visualizer = Visualizer(prompts)
     visualizer.run()

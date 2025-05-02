@@ -10,8 +10,8 @@ class Autoencoder(nn.Module):
                  n_components: int = 65536,   # C
                  hidden_dim: int = 768,
                  top_k: int = 1024,
-                 lr: float = 3e-5,
-                 num_epochs: int = 10,
+                 lr: float = 2e-5,
+                 num_epochs: int = 3,
                  mark: int = -1,
                  faithful_alpha: float = 1,
                  ):
@@ -41,24 +41,26 @@ class Autoencoder(nn.Module):
         self.pool = nn.AdaptiveAvgPool1d(1)
         self.opt = torch.optim.AdamW(self.parameters(), lr=lr)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x):                     # x: (B,T,D)
+        B,T,D = x.shape
         x = x.float()
-        pooled = self.pool(x.transpose(1, 2)).squeeze(-1)
-        logits = self.encoder(pooled)                           # (B,C)
-        weights = logits.softmax(dim=-1)                 # (B,C)
-        weights = weights * math.sqrt(self.n_components)
-        points = weights.unsqueeze(-1) * self.components        # (B,C,3)
-        _, idx = torch.topk(logits, self.top_k, dim=-1) # (B,top_k)
-        batch_ix = torch.arange(x.size(0), device=x.device).unsqueeze(-1)
-        points = points[batch_ix, idx]
-        points = points + torch.randn_like(points) * self.noise_factor * 0.1
-        points = F.normalize(points, dim=-1)
-        decoded = self.decoder(points).sum(dim=1)
-        return points, decoded, pooled
+        logits_tok = self.encoder(x)          # (B,T,C)
+        logits_sum = logits_tok.sum(1) / math.sqrt(T)   # (B,C)
+        _, idx = torch.topk(logits_sum, self.top_k, dim=-1)   # (B,k)
+        batch_ix = torch.arange(B, device=x.device).unsqueeze(-1)
+        comps_k   = self.components[idx]                 # (B,k,3)
+        comps_k   = F.normalize(comps_k + torch.randn_like(comps_k)*self.noise_factor, dim=-1)
+        dec_k     = self.decoder(comps_k)                # (B,k,D)
+        idx_exp   = idx.unsqueeze(1).expand(-1,T,-1)     # (B,T,k)
+        weights_t = torch.gather(logits_tok, 2, idx_exp) # (B,T,k)
+        weights_t = weights_t.softmax(-1) * math.sqrt(self.top_k)
+        x_recon   = torch.einsum('btk,bkd->btd', weights_t, dec_k)  # (B,T,D)
+
+        return x_recon, comps_k                    # plus whatever else
 
     def _loss(self, batch):
-        pts, decoded, pooled = self.forward(batch)          # (B,k,3), (B,D)
-        L_f = self.faithful_alpha * F.mse_loss(decoded, pooled)
+        r, points = self.forward(batch)          # (B,k,3), (B,D)
+        L_f = self.faithful_alpha * F.mse_loss(r, batch)
         loss = L_f
         self.reporter.update(loss=loss, f=L_f)
         return loss
@@ -67,7 +69,8 @@ class Autoencoder(nn.Module):
         if self.mark > 0:
             training_set = training_set[:self.mark]
         self.reporter = MetricsReporter()
-        self.noise_factor = 1.0
+        self.noise_factor = 0.5 
+        self.noise_scaling = 0.001**(1/self.num_epochs)
         self.train()
         for epoch in range(self.num_epochs):
             for sample in training_set:
@@ -77,5 +80,6 @@ class Autoencoder(nn.Module):
                     loss.backward()
                     self.opt.step()
             self.reporter.epoch_end(epoch)
-            self.noise_factor *= 0.5
+            self.noise_factor *= self.noise_scaling 
+            print(f"new noise factor: {self.noise_factor}")
         self.eval()
