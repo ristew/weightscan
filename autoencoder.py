@@ -7,11 +7,11 @@ from metrics_reporter import MetricsReporter
 class Autoencoder(nn.Module):
     def __init__(self,
                  input_dim: int,
-                 n_components: int = 65536,   # C
+                 n_components: int = 2**15,   # C
                  hidden_dim: int = 768,
-                 top_k: int = 1024,
-                 lr: float = 2e-5,
-                 num_epochs: int = 3,
+                 top_k: int = 64,
+                 lr: float = 1e-4,
+                 num_epochs: int = 25,
                  mark: int = -1,
                  faithful_alpha: float = 1,
                  ):
@@ -43,17 +43,18 @@ class Autoencoder(nn.Module):
 
     def forward(self, x):                     # x: (B,T,D)
         B,T,D = x.shape
+        k = min(self.top_k * T, self.n_components)
         x = x.float()
         logits_tok = self.encoder(x)          # (B,T,C)
         logits_sum = logits_tok.sum(1) / math.sqrt(T)   # (B,C)
-        _, idx = torch.topk(logits_sum, self.top_k, dim=-1)   # (B,k)
+        _, idx = torch.topk(logits_sum, k, dim=-1)   # (B,k)
         batch_ix = torch.arange(B, device=x.device).unsqueeze(-1)
         comps_k   = self.components[idx]                 # (B,k,3)
         comps_k   = F.normalize(comps_k + torch.randn_like(comps_k)*self.noise_factor, dim=-1)
         dec_k     = self.decoder(comps_k)                # (B,k,D)
         idx_exp   = idx.unsqueeze(1).expand(-1,T,-1)     # (B,T,k)
         weights_t = torch.gather(logits_tok, 2, idx_exp) # (B,T,k)
-        weights_t = weights_t.softmax(-1) * math.sqrt(self.top_k)
+        weights_t = weights_t.softmax(-1) * math.sqrt(k)
         x_recon   = torch.einsum('btk,bkd->btd', weights_t, dec_k)  # (B,T,D)
 
         return x_recon, comps_k                    # plus whatever else

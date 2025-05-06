@@ -93,7 +93,7 @@ class Visualizer:
         self.embeddings = []
         for (state, prompt) in self.states:
             layer = state[target_layer]
-            points = self.autoencoder(layer.float().to(self.device))[1][0]
+            points = self.autoencoder(layer.to(self.device))[1][0]
             tops = self.top_tokens(layer)
             neighbors = self.find_nearest_neighbors(points)
             frame = Frame(points, prompt, target_layer, tops, neighbors)

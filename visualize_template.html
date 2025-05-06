@@ -34,7 +34,8 @@
     const TOPS       = FRAMES.map(f=>f.tops);
     const PROMPTS    = FRAMES.map(f=>f.prompt);
     const N_FRAMES   = FRAMES.length;
-    const TOP_K      = POINTS[0].length;
+    /* ‑‑ NEW: support variable‑length point clouds ‑‑ */
+    const MAX_PTS    = Math.max(...POINTS.map(p=>p.length));
     const NBR_PER_PT = NEIGHBORS[0][0].length;
 
     /* camera + scene */
@@ -48,9 +49,9 @@
     const controls = new OrbitControls(camera,renderer.domElement);
     controls.target.set(...centroid(POINTS[0])); controls.update();
 
-    /* neighbour lines – allocate once, reuse */
+    /* neighbour lines – allocate once for the maximum needed */
     const LINES=[];
-    for(let p=0;p<TOP_K;++p){
+    for(let p=0;p<MAX_PTS;++p){
       for(let n=0;n<NBR_PER_PT;++n){
         const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
         const mat = new THREE.LineBasicMaterial();
@@ -63,7 +64,6 @@
       const c = centroid(f.points);
       let maxDist = 0, maxC = 0;
 
-      // fix: iterate over each point’s neighbor list, then over its pairs
       for (const nbrList of f.neighbors){
         for (const [, d] of nbrList){
           if (d > maxDist) maxDist = d;
@@ -99,17 +99,21 @@
     const FRAME_MS=60;
 
     function draw(f){
-      /* points – bulk copy */
       const pts = POINTS[f];
       const {maxDist,maxC,c} = META[f];
+
+      /* hide all lines, then reuse the first needed ones */
+      LINES.forEach(l=>l.visible=false);
+
       let l=0;
-      for(let p=0;p<TOP_K;++p){
+      for(let p=0;p<pts.length;++p){
         const base=pts[p];
         for(const [nbrIdx,nbrDist] of NEIGHBORS[f][p]){
-          const w = (1-nbrDist/maxDist)**2;
-          const cw= (1-dist(base,c)/maxC)**2;
-          const tgt=interp(base,pts[nbrIdx],.02/dist(base,pts[nbrIdx]));
+          const w  = (1-nbrDist/maxDist)**2;
+          const cw = (1-dist(base,c)/maxC)**2;
+          const tgt= interp(base,pts[nbrIdx], .004/dist(base,pts[nbrIdx]));
           const line=LINES[l++];
+          line.visible=true;
           line.geometry.attributes.position.setXYZ(0,...base);
           line.geometry.attributes.position.setXYZ(1,...tgt);
           line.geometry.attributes.position.needsUpdate=true;
@@ -118,7 +122,7 @@
       }
 
       /* HUD */
-      frameInfo.textContent=`frame ${f}/${N_FRAMES-1} layer ${FRAMES[f].layer_idx + 1}/${DATA.n_layers}`;
+      frameInfo.textContent=`frame ${f}/${N_FRAMES-1}   layer ${FRAMES[f].layer_idx+1}/${DATA.n_layers}`;
       topsInfo.textContent=TOPS[f].map(([tok,p])=>`'${tok.trim()}' ${p.toFixed(3)}`).join('\n');
       promptInfo.textContent=`prompt: ${PROMPTS[f]}`;
       bar.style.width=`${(FRAMES[f].layer_idx+1)/DATA.n_layers*100}%`;
